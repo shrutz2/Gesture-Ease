@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GestureB - Exact Training Approach</title>
+  </head>
+  
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+    
+    <script>
+      console.log('🎯 GestureB - EXACT Training Approach');
+      console.log('भाई exactly वैसे ही predict करेंगे जैसे train किया!');
+      
+      // Check backend connection
+      setTimeout(async () => {
+        try {
+          const response = await fetch('http://localhost:5000/api/status');
+          const data = await response.json();
+          
+          if (data.model_loaded) {
+            console.log(`✅ Backend ready with ${data.total_words} words`);
+            console.log(`🎯 Approach: ${data.approach}`);
+            console.log(`📊 Features: ${data.feature_dim}D, Sequence: ${data.sequence_length}`);
+          } else {
+            console.warn('⚠️ Backend model not loaded yet');
+          }
+        } catch (error) {
+          console.error('❌ Backend connection failed:', error.message);
+          console.log('Start backend with: cd backend && python app.py');
+        }
+      }, 1000);
+    </script>
+  </body>
+</html>
