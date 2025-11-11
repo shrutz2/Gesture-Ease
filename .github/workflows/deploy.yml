@@ -26,6 +26,7 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v1
 
       - name: Build and push backend image
+        id: build-backend
         env:
           ECR_REPO: ${{ secrets.ECR_BACKEND_REPO }}
           TAG: ${{ github.sha }}
@@ -36,6 +37,7 @@ jobs:
           echo "backend_image=$IMAGE_URI" >> $GITHUB_OUTPUT
 
       - name: Build and push frontend image
+        id: build-frontend
         env:
           ECR_REPO: ${{ secrets.ECR_FRONTEND_REPO }}
           TAG: ${{ github.sha }}
@@ -56,7 +58,7 @@ jobs:
         id: render-task
         run: |
           # Replace placeholder image URIs in the task template and register it in ECS
-          BACKEND_IMAGE=${{ steps.build_and_deploy.outputs.backend_image }}
+          BACKEND_IMAGE="${{ steps.build-backend.outputs.backend_image }}"
           cat deploy/ecs-task-def-template.json | jq --arg img "$BACKEND_IMAGE" '.containerDefinitions[0].image=$img' > taskdef.json
           echo "taskdef_file=taskdef.json" >> $GITHUB_OUTPUT
 
