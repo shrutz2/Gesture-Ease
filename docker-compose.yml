@@ -1,0 +1,31 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: gesture-ease-backend:latest
+    container_name: gesture-ease-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    volumes:
+      - ./backend/models:/app/models:ro
+      - ./backend/artifacts:/app/artifacts:ro
+
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: gesture-ease-frontend:latest
+    container_name: gesture-ease-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000
