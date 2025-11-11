@@ -1,0 +1,36 @@
+name: CI debug (manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Print GH env and runner info
+        run: |
+          echo "GITHUB_WORKFLOW=$GITHUB_WORKFLOW"
+          echo "GITHUB_RUN_ID=$GITHUB_RUN_ID"
+          echo "GITHUB_SHA=$GITHUB_SHA"
+          echo "Runner: $(uname -a || true)"
+          env | sort
+
+      - name: List repo files (top-level)
+        run: |
+          echo "--- top-level files ---"
+          ls -la
+          echo "--- .github/workflows ---"
+          ls -la .github/workflows || true
+          echo "--- backend files sample ---"
+          ls -la backend || true
+
+      - name: Print docker and aws CLI versions (if available)
+        run: |
+          docker --version || echo "docker not available"
+          aws --version || echo "aws not available"
+
+      - name: Success marker
+        run: echo "ci-debug completed"
