@@ -1,0 +1,10 @@
+flask>=2.0
+flask-cors
+numpy
+opencv-python-headless
+mediapipe
+tensorflow
+scikit-learn
+pillow
+pytest
+h5py
