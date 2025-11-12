@@ -59,6 +59,10 @@ jobs:
         run: |
           # Replace placeholder image URIs in the task template and register it in ECS
           BACKEND_IMAGE="${{ steps.build-backend.outputs.backend_image }}"
+          if [ ! -f "deploy/ecs-task-def-template.json" ]; then
+            echo "Error: deploy/ecs-task-def-template.json not found"
+            exit 1
+          fi
           cat deploy/ecs-task-def-template.json | jq --arg img "$BACKEND_IMAGE" '.containerDefinitions[0].image=$img' > taskdef.json
           echo "taskdef_file=taskdef.json" >> $GITHUB_OUTPUT
 
