@@ -4,8 +4,8 @@
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "512",
   "memory": "1024",
-  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
-  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskRole",
+  "executionRoleArn": "arn:aws:iam::799947215168:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::799947215168:role/ecsTaskRole",
   "containerDefinitions": [
     {
       "name": "gesture-ease-backend",
@@ -24,7 +24,7 @@
         },
         {
           "name": "S3_MODELS_BUCKET",
-          "value": "YOUR_S3_BUCKET_NAME"
+          "value": "5gesture-ease-prod-models"
         }
       ],
       "logConfiguration": {
