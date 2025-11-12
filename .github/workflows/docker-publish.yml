@@ -1,16 +1,10 @@
 name: Build and Push Docker Images (manual)
 
-# Disabled automatic runs. This workflow was converted to manual trigger to avoid
-# accidental CI runs. Use 'workflow_dispatch' to run it manually from Actions tab.
-name: Build and Push Docker Images (manual)
-
-# Disabled automatic runs. This workflow was converted to manual trigger to avoid
-# accidental CI runs. Use 'workflow_dispatch' to run it manually from Actions tab.
 on: [workflow_dispatch]
 
 env:
-  BACKEND_REPO: gesture-ease-backend
-  FRONTEND_REPO: gesture-ease-frontend
+  BACKEND_REPO: gesture-ease-prod-backend
+  FRONTEND_REPO: gesture-ease-prod-frontend
 
 jobs:
   build-and-push:
@@ -33,35 +27,16 @@ jobs:
         env:
           ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
         run: |
-          set -e
           BACKEND_IMAGE=${ECR_REGISTRY}/${{ env.BACKEND_REPO }}:latest
-          echo "Ensuring ECR repository exists: ${{ env.BACKEND_REPO }}"
-          if ! aws ecr describe-repositories --repository-names ${{ env.BACKEND_REPO }} >/dev/null 2>&1; then
-            echo "Creating ECR repository: ${{ env.BACKEND_REPO }}"
-            aws ecr create-repository --repository-name ${{ env.BACKEND_REPO }} || true
-          else
-            echo "Repository exists"
-          fi
-          echo "Building backend image $BACKEND_IMAGE"
+          aws ecr create-repository --repository-name ${{ env.BACKEND_REPO }} || true
           docker build -f backend/Dockerfile -t $BACKEND_IMAGE backend
           docker push $BACKEND_IMAGE
 
-      - name: Build frontend image (optional push to ECR)
+      - name: Build and push frontend image to ECR
         env:
           ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
         run: |
-          set -e
           FRONTEND_IMAGE=${ECR_REGISTRY}/${{ env.FRONTEND_REPO }}:latest
-          echo "Ensuring ECR repository exists: ${{ env.FRONTEND_REPO }}"
-          if ! aws ecr describe-repositories --repository-names ${{ env.FRONTEND_REPO }} >/dev/null 2>&1; then
-            echo "Creating ECR repository: ${{ env.FRONTEND_REPO }}"
-            aws ecr create-repository --repository-name ${{ env.FRONTEND_REPO }} || true
-          else
-            echo "Repository exists"
-          fi
-          echo "Building frontend image $FRONTEND_IMAGE"
+          aws ecr create-repository --repository-name ${{ env.FRONTEND_REPO }} || true
           docker build -f frontend/Dockerfile -t $FRONTEND_IMAGE frontend
-          docker push $FRONTEND_IMAGE || echo "Push failed"
-
-      - name: Actions summary
-        run: echo "Docker build & push steps complete. Backend image: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ env.BACKEND_REPO }}:latest"
+          docker push $FRONTEND_IMAGE
