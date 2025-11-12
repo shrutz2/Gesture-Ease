@@ -23,13 +23,20 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v1
 
+      - name: Create ECR repositories
+        run: |
+          echo "Creating ECR repositories..."
+          aws ecr create-repository --repository-name ${{ env.BACKEND_REPO }} || echo "Backend repo already exists"
+          aws ecr create-repository --repository-name ${{ env.FRONTEND_REPO }} || echo "Frontend repo already exists"
+
       - name: Build and push backend image to ECR
         env:
           ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
         run: |
           BACKEND_IMAGE=${ECR_REGISTRY}/${{ env.BACKEND_REPO }}:latest
-          aws ecr create-repository --repository-name ${{ env.BACKEND_REPO }} || true
+          echo "Building backend image: $BACKEND_IMAGE"
           docker build -f backend/Dockerfile -t $BACKEND_IMAGE backend
+          echo "Pushing backend image to ECR"
           docker push $BACKEND_IMAGE
 
       - name: Build and push frontend image to ECR
@@ -37,6 +44,7 @@ jobs:
           ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
         run: |
           FRONTEND_IMAGE=${ECR_REGISTRY}/${{ env.FRONTEND_REPO }}:latest
-          aws ecr create-repository --repository-name ${{ env.FRONTEND_REPO }} || true
+          echo "Building frontend image: $FRONTEND_IMAGE"
           docker build -f frontend/Dockerfile -t $FRONTEND_IMAGE frontend
+          echo "Pushing frontend image to ECR"
           docker push $FRONTEND_IMAGE
