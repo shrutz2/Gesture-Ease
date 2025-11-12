@@ -2,6 +2,10 @@ name: Build and Push Docker Images (manual)
 
 # Disabled automatic runs. This workflow was converted to manual trigger to avoid
 # accidental CI runs. Use 'workflow_dispatch' to run it manually from Actions tab.
+name: Build and Push Docker Images (manual)
+
+# Disabled automatic runs. This workflow was converted to manual trigger to avoid
+# accidental CI runs. Use 'workflow_dispatch' to run it manually from Actions tab.
 on: [workflow_dispatch]
 
 env:
