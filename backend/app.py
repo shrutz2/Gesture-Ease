@@ -1148,14 +1148,14 @@ def test_model():
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint for ECS"""
     return jsonify({
         "success": True,
         "status": "healthy",
         "model_loaded": MODEL_LOADED,
         "timestamp": datetime.now().isoformat(),
         "total_classes": len(LABELS_MAP) if LABELS_MAP else 0
-    })
+    }), 200
 
 
 # Debug endpoint for troubleshooting
