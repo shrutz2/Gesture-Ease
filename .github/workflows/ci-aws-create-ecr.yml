@@ -1,0 +1,41 @@
+name: CI AWS Create ECR Repo and Dispatch Publish
+
+on:
+  workflow_dispatch:
+
+jobs:
+  create-repo:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      actions: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Create ECR repository
+        id: create_ecr
+        run: |
+          echo "Creating ECR repository: gesture-ease-prod-backend"
+          aws ecr create-repository --repository-name gesture-ease-prod-backend || echo "create-repository returned non-zero or already exists"
+
+      - name: Confirm repository
+        run: |
+          aws ecr describe-repositories --repository-names gesture-ease-prod-backend
+
+      - name: Dispatch docker-publish workflow
+        uses: peter-evans/workflow-dispatch@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          workflow: docker-publish.yml
+          ref: main
