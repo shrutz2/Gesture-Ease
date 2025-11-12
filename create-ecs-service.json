@@ -1,0 +1,21 @@
+{
+  "serviceName": "gesture-ease-prod-service",
+  "cluster": "5gesture-ease-prod-cluster",
+  "taskDefinition": "gesture-ease-task",
+  "desiredCount": 1,
+  "launchType": "FARGATE",
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": ["subnet-12345", "subnet-67890"],
+      "securityGroups": ["sg-12345"],
+      "assignPublicIp": "ENABLED"
+    }
+  },
+  "loadBalancers": [
+    {
+      "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:799947215168:targetgroup/gesture-ease-tg/1234567890123456",
+      "containerName": "gesture-ease-backend",
+      "containerPort": 5000
+    }
+  ]
+}
