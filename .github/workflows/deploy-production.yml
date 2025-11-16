@@ -1,9 +1,10 @@
 name: Deploy to Production
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
+  # Disabled - ECR repositories not set up
+  # push:
+  #   branches: [ main ]
 
 env:
   AWS_REGION: ap-south-1
