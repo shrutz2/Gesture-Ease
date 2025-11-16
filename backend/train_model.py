@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""
-COMPLETELY FIXED Sign Language Recognition Model Training
-Guaranteed to work and achieve 90%+ accuracy
-"""
 
 import numpy as np
 import tensorflow as tf
