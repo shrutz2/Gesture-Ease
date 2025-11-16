@@ -1,56 +1,45 @@
-name: CI/CD Deploy to ECS
+name: Deploy to ECS
 
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  build_and_deploy:
+  deploy:
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Login to ECR
-        uses: aws-actions/amazon-ecr-login@v1
-
-      - name: Build and push backend image
-        id: build-backend
-        env:
-          ECR_REPO: ${{ secrets.ECR_BACKEND_REPO }}
-          TAG: ${{ github.sha }}
-        run: |
-          IMAGE_URI=${ECR_REPO}:${TAG}
-          docker build -t $IMAGE_URI ./backend
-          docker push $IMAGE_URI
-          echo "backend_image=$IMAGE_URI" >> $GITHUB_OUTPUT
-
-      - name: Upload model artifacts to S3
-        env:
-          S3_BUCKET: ${{ secrets.S3_MODELS_BUCKET }}
-        run: |
-          aws s3 sync backend/models s3://$S3_BUCKET/ --acl bucket-owner-full-control
-
-      - name: Render task definition
-        id: render-task
-        run: |
-          BACKEND_IMAGE="${{ steps.build-backend.outputs.backend_image }}"
-          cat deploy/ecs-task-def-template.json | jq --arg img "$BACKEND_IMAGE" '.containerDefinitions[0].image=$img' > taskdef.json
-
-      - name: Register new task definition
-        run: |
-          aws ecs register-task-definition --cli-input-json file://taskdef.json
-
-      - name: Update ECS service
-        env:
-          CLUSTER: ${{ secrets.ECS_CLUSTER }}
-          SERVICE: ${{ secrets.ECS_SERVICE }}
-        run: |
-          aws ecs update-service --cluster $CLUSTER --service $SERVICE --force-new-deployment
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ap-south-1
+        
+    - name: Deploy Backend Service
+      run: |
+        aws ecs update-service \
+          --cluster gesture-ease-cluster \
+          --service gesture-ease-service \
+          --force-new-deployment \
+          --region ap-south-1
+          
+    - name: Deploy Frontend Service  
+      run: |
+        aws ecs update-service \
+          --cluster gesture-ease-cluster \
+          --service gesture-ease-frontend \
+          --force-new-deployment \
+          --region ap-south-1
+          
+    - name: Deploy App Service
+      run: |
+        aws ecs update-service \
+          --cluster gesture-ease-cluster \
+          --service gesture-ease-app \
+          --force-new-deployment \
+          --region ap-south-1
