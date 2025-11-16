@@ -7,10 +7,10 @@ on:
     branches: [ main, master ]
 
 env:
-  AWS_REGION: us-east-1
-  ECR_BACKEND_REPOSITORY: gesture-ease-prod-backend
-  ECR_FRONTEND_REPOSITORY: gesture-ease-prod-frontend
-  ECS_CLUSTER: 5gesture-ease-prod-cluster
+  AWS_REGION: ap-south-1
+  ECR_BACKEND_REPOSITORY: gesture-ease-backend
+  ECR_FRONTEND_REPOSITORY: gesture-ease-frontend
+  ECS_CLUSTER: gesture-ease-cluster
 
 jobs:
   build-backend:
@@ -106,7 +106,7 @@ jobs:
           "requiresCompatibilities": ["FARGATE"],
           "cpu": "1024",
           "memory": "2048",
-          "executionRoleArn": "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/ecsTaskExecutionRole",
+          "executionRoleArn": "arn:aws:iam::533267005222:role/ecsTaskExecutionRole",
           "containerDefinitions": [
             {
               "name": "backend",
@@ -158,6 +158,6 @@ jobs:
       run: |
         aws ecs update-service \
           --cluster ${{ env.ECS_CLUSTER }} \
-          --service gesture-ease-prod-service \
+          --service gesture-ease-service \
           --task-definition gesture-ease-prod \
           --force-new-deployment
