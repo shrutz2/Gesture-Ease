@@ -22,24 +22,27 @@ jobs:
         
     - name: Deploy Backend Service
       run: |
-        aws ecs update-service \
-          --cluster gesture-ease-cluster \
-          --service gesture-ease-service \
-          --force-new-deployment \
-          --region ap-south-1
+        if aws ecs describe-services --cluster gesture-ease-cluster --services gesture-ease-service --region ap-south-1 --query 'services[0].status' --output text 2>/dev/null | grep -q ACTIVE; then
+          aws ecs update-service --cluster gesture-ease-cluster --service gesture-ease-service --force-new-deployment --region ap-south-1
+        else
+          echo "Service gesture-ease-service not found. Create it first in AWS Console."
+          exit 1
+        fi
           
     - name: Deploy Frontend Service  
       run: |
-        aws ecs update-service \
-          --cluster gesture-ease-cluster \
-          --service gesture-ease-frontend \
-          --force-new-deployment \
-          --region ap-south-1
+        if aws ecs describe-services --cluster gesture-ease-cluster --services gesture-ease-frontend --region ap-south-1 --query 'services[0].status' --output text 2>/dev/null | grep -q ACTIVE; then
+          aws ecs update-service --cluster gesture-ease-cluster --service gesture-ease-frontend --force-new-deployment --region ap-south-1
+        else
+          echo "Service gesture-ease-frontend not found. Create it first in AWS Console."
+          exit 1
+        fi
           
     - name: Deploy App Service
       run: |
-        aws ecs update-service \
-          --cluster gesture-ease-cluster \
-          --service gesture-ease-app \
-          --force-new-deployment \
-          --region ap-south-1
+        if aws ecs describe-services --cluster gesture-ease-cluster --services gesture-ease-app --region ap-south-1 --query 'services[0].status' --output text 2>/dev/null | grep -q ACTIVE; then
+          aws ecs update-service --cluster gesture-ease-cluster --service gesture-ease-app --force-new-deployment --region ap-south-1
+        else
+          echo "Service gesture-ease-app not found. Create it first in AWS Console."
+          exit 1
+        fi

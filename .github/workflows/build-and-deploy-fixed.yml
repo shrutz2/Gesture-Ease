@@ -1,4 +1,4 @@
-name: Build and Deploy to AWS
+name: Build and Deploy to AWS (Fixed)
 
 on:
   push:
@@ -7,14 +7,15 @@ on:
     branches: [ main, master ]
 
 env:
-  AWS_REGION: us-east-1
-  ECR_BACKEND_REPOSITORY: gesture-ease-prod-backend
-  ECR_FRONTEND_REPOSITORY: gesture-ease-prod-frontend
-  ECS_CLUSTER: 5gesture-ease-prod-cluster
+  AWS_REGION: ap-south-1
+  AWS_ACCOUNT_ID: 000000000000
+  ECR_BACKEND_REPOSITORY: gesture-ease-backend
+  ECR_FRONTEND_REPOSITORY: gesture-ease-frontend
+  ECS_CLUSTER: gesture-ease-cluster
 
 jobs:
-  build-backend:
-    name: Build Backend
+  build-and-deploy:
+    name: Build and Deploy
     runs-on: ubuntu-latest
     
     steps:
@@ -31,82 +32,68 @@ jobs:
     - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
+      with:
+        registry-type: private
 
-    - name: Build, tag, and push backend image
+    - name: Verify ECR Login
+      run: |
+        echo "ECR Registry: ${{ steps.login-ecr.outputs.registry }}"
+        aws ecr describe-repositories --region ${{ env.AWS_REGION }} || echo "No repositories found"
+
+    - name: Build and push backend image
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
+        echo "Building backend image..."
         cd backend
+        
+        # Build image
         docker build -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG .
         docker build -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:latest .
+        
+        # Push images
+        echo "Pushing backend images..."
         docker push $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG
         docker push $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:latest
+        
+        echo "Backend build complete!"
 
-  build-frontend:
-    name: Build Frontend
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
-
-    - name: Build, tag, and push frontend image
+    - name: Build and push frontend image
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
+        echo "Building frontend image..."
         cd frontend
+        
+        # Build image
         docker build -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG .
         docker build -t $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:latest .
+        
+        # Push images
+        echo "Pushing frontend images..."
         docker push $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:$IMAGE_TAG
         docker push $ECR_REGISTRY/$ECR_FRONTEND_REPOSITORY:latest
+        
+        echo "Frontend build complete!"
 
-  deploy:
-    name: Deploy to ECS
-    runs-on: ubuntu-latest
-    needs: [build-backend, build-frontend]
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
-
-    - name: Create ECS Task Definition
+    - name: Deploy to ECS
+      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
+        echo "Creating ECS task definition..."
+        
         cat > task-definition.json << EOF
         {
-          "family": "gesture-ease-prod",
+          "family": "gesture-ease-task",
           "networkMode": "awsvpc",
           "requiresCompatibilities": ["FARGATE"],
           "cpu": "1024",
           "memory": "2048",
-          "executionRoleArn": "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/ecsTaskExecutionRole",
+          "executionRoleArn": "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/ecsTaskExecutionRole",
           "containerDefinitions": [
             {
               "name": "backend",
@@ -149,15 +136,24 @@ jobs:
           ]
         }
         EOF
-
-    - name: Register ECS Task Definition
-      run: |
+        
+        echo "Registering task definition..."
         aws ecs register-task-definition --cli-input-json file://task-definition.json
-
-    - name: Update ECS Service
-      run: |
+        
+        echo "Updating ECS service..."
         aws ecs update-service \
           --cluster ${{ env.ECS_CLUSTER }} \
-          --service gesture-ease-prod-service \
-          --task-definition gesture-ease-prod \
+          --service gesture-ease-service \
+          --task-definition gesture-ease-task \
           --force-new-deployment
+        
+        echo "Deployment complete!"
+
+    - name: Deployment Status
+      if: always()
+      run: |
+        echo "=== Deployment Summary ==="
+        echo "Backend Image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:${{ github.sha }}"
+        echo "Frontend Image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPOSITORY }}:${{ github.sha }}"
+        echo "ECS Cluster: ${{ env.ECS_CLUSTER }}"
+        echo "AWS Region: ${{ env.AWS_REGION }}"
