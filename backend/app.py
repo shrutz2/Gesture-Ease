@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-COMPLETELY FIXED Flask App for Real-time Sign Language Recognition
-Final version that works 100% with frontend
-"""
 
 import cv2
 import mediapipe as mp
@@ -29,7 +24,7 @@ logger = logging.getLogger(__name__)
 SEQUENCE_LENGTH = 30
 FEATURE_DIM = 126
 CONFIDENCE_THRESHOLD = 0.3  # FIXED: Reduced from 0.7 to 0.3 for better recognition
-MIN_HAND_CONFIDENCE = 0.5   # FIXED: Reduced from 0.7 to 0.5
+MIN_HAND_CONFIDENCE = 0.7   # MUST match training exactly!
 
 # Global variables for model and preprocessing
 MODEL = None
@@ -158,9 +153,9 @@ def load_mlops_artifacts():
         for model_file in ['best_model.h5', 'model.h5', 'model.keras']:
             model_path = models_dir / model_file
             if model_path.exists():
-                logger.info(f"ðŸ“¦ Loading model from {model_path}...")
+                logger.info(f" Loading model from {model_path}...")
                 MODEL = tf.keras.models.load_model(str(model_path))
-                logger.info("âœ… Model loaded successfully")
+                logger.info(" Model loaded successfully")
                 model_loaded = True
                 break
         
@@ -173,9 +168,9 @@ def load_mlops_artifacts():
         if scaler_path.exists():
             with open(scaler_path, 'rb') as f:
                 SCALER = pickle.load(f)
-            logger.info("âœ… Scaler loaded")
+            logger.info("✓ Scaler loaded")
         else:
-            logger.error("âŒ Scaler not found")
+            logger.error(" Scaler not found")
             return False
         
         # Load CLEAN labels - prioritize word_mappings.json for clean words
@@ -184,14 +179,14 @@ def load_mlops_artifacts():
         # Try word_mappings.json first (has clean words)
         word_mappings_path = artifacts_dir / 'word_mappings.json'
         if word_mappings_path.exists():
-            logger.info(f"ðŸ“‹ Loading clean words from {word_mappings_path}...")
+            logger.info(f"‹ Loading clean words from {word_mappings_path}...")
             with open(word_mappings_path, 'r') as f:
                 word_data = json.load(f)
             
             if 'class_names' in word_data:
                 clean_words = word_data['class_names']
                 LABELS_MAP = {i: word for i, word in enumerate(clean_words)}
-                logger.info(f"âœ… Clean words loaded: {len(LABELS_MAP)} classes")
+                logger.info(f" Clean words loaded: {len(LABELS_MAP)} classes")
                 labels_loaded = True
         
         # Fallback to other label files if needed
@@ -232,14 +227,13 @@ def load_mlops_artifacts():
             logger.error("âŒ No labels found")
             return False
         
-        # Remove duplicates and create unique word list
-        unique_words = list(set(LABELS_MAP.values()))
-        LABELS_MAP = {i: word for i, word in enumerate(sorted(unique_words))}
+        # FIXED: Keep EXACT order from label encoder - DO NOT modify!
+        # Labels already correctly loaded above
         
         MODEL_LOADED = True
-        logger.info("ðŸŽ‰ All artifacts loaded successfully!")
-        logger.info(f"ðŸŽ¯ Total unique words: {len(LABELS_MAP)}")
-        logger.info(f"ðŸ“ Sample words: {list(LABELS_MAP.values())[:10]}")
+        logger.info(" All artifacts loaded successfully!")
+        logger.info(f" Total unique words: {len(LABELS_MAP)}")
+        logger.info(f" Sample words: {list(LABELS_MAP.values())[:10]}")
         
         return True
         
@@ -330,90 +324,232 @@ def smooth_predictions(new_prediction):
 
 
 # FIXED: Add the missing /api/predict endpoint that frontend expects
-@app.route('/api/predict', methods=['POST'])
+# @app.route('/api/predict', methods=['POST'])
+# def predict_gesture():
+#     """NEW: Multi-frame prediction endpoint that frontend expects"""
+#     if not MODEL_LOADED:
+#         return jsonify({
+#             "is_correct": False,
+#             "message": "Model not loaded. Check server logs.",
+#             "confidence": 0
+#         }), 503
+
+#     try:
+#         data = request.json
+#         target_word = data.get('target_word', '').lower()  # FIXED: correct parameter name
+#         frames = data.get('frames', [])
+        
+#         logger.info(f"ðŸŽ¯ Received prediction request for '{target_word}' with {len(frames)} frames")
+        
+#         if not frames:
+#             return jsonify({
+#                 "is_correct": False,
+#                 "message": "No frames provided",
+#                 "confidence": 0
+#             }), 400
+        
+#         # Process frames to extract landmarks
+#         landmarks_sequence = []
+#         valid_frames = 0
+        
+#         for i, frame_base64 in enumerate(frames):
+#             try:
+#                 # Remove data URL prefix if present
+#                 if 'data:image' in frame_base64:
+#                     frame_base64 = frame_base64.split(',')[1]
+                
+#                 frame_data = base64.b64decode(frame_base64)
+#                 nparr = np.frombuffer(frame_data, np.uint8)
+#                 frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                
+#                 if frame is not None:
+#                     frame = cv2.resize(frame, (640, 480))
+#                     landmark_vector, hands_detected, _ = landmark_extractor.extract_hand_landmarks(frame)
+                    
+#                     if hands_detected > 0:
+#                         landmarks_sequence.append(landmark_vector)
+#                         valid_frames += 1
+#                     else:
+#                         landmarks_sequence.append(np.zeros(FEATURE_DIM))
+                        
+#             except Exception as e:
+#                 logger.error(f"Error processing frame {i}: {e}")
+#                 landmarks_sequence.append(np.zeros(FEATURE_DIM))
+        
+#         logger.info(f"ðŸ“Š Processed {len(landmarks_sequence)} frames, {valid_frames} with hands detected")
+        
+#         # FIXED: Reduced from 5 to 2 frames minimum for better recognition
+#         if valid_frames < 2:  
+#             return jsonify({
+#                 "is_correct": False,
+#                 "message": f"Not enough hand detection. Only {valid_frames} valid frames found. Keep hands visible!",
+#                 "confidence": 0,
+#                 "debug_info": {
+#                     "total_frames": len(frames),
+#                     "valid_frames": valid_frames,
+#                     "method": "multi_frame_landmark_extraction"
+#                 }
+#             })
+        
+#         # Ensure we have exactly SEQUENCE_LENGTH frames
+#         if len(landmarks_sequence) > SEQUENCE_LENGTH:
+#             # Sample uniformly
+#             indices = np.linspace(0, len(landmarks_sequence)-1, SEQUENCE_LENGTH, dtype=int)
+#             landmarks_sequence = [landmarks_sequence[i] for i in indices]
+#         elif len(landmarks_sequence) < SEQUENCE_LENGTH:
+#             # Pad with last frame
+#             while len(landmarks_sequence) < SEQUENCE_LENGTH:
+#                 landmarks_sequence.append(landmarks_sequence[-1] if landmarks_sequence else np.zeros(FEATURE_DIM))
+        
+#         # Convert to numpy array and normalize
+#         sequence_array = np.array(landmarks_sequence, dtype=np.float32)
+#         sequence_flat = sequence_array.reshape(-1, FEATURE_DIM)
+#         sequence_normalized = SCALER.transform(sequence_flat)
+#         sequence_processed = sequence_normalized.reshape(1, SEQUENCE_LENGTH, FEATURE_DIM)
+        
+#         # Make prediction
+#         prediction_probs = MODEL.predict(sequence_processed, verbose=0)[0]
+        
+#         # Get top predictions
+#         top_k_indices = np.argsort(prediction_probs)[::-1][:5]
+#         top_predictions = []
+#         for i in top_k_indices:
+#             label = LABELS_MAP.get(i, f"Unknown_{i}")
+#             confidence = float(prediction_probs[i])
+#             top_predictions.append({"word": label, "confidence": confidence})
+        
+#         best_prediction = top_predictions[0]
+#         predicted_word = best_prediction["word"]
+#         confidence = best_prediction["confidence"]
+        
+#         # Check if prediction is correct
+#         is_correct = predicted_word.lower() == target_word.lower()
+        
+#         # FIXED: More lenient scoring system
+#         points = 0
+#         if is_correct:
+#             if confidence > 0.5:  # High confidence
+#                 base_points = 15
+#                 confidence_bonus = int(confidence * 10)
+#                 points = base_points + confidence_bonus
+#             elif confidence > 0.3:  # Medium confidence  
+#                 points = 10
+#             else:  # Low confidence but still correct
+#                 points = 5
+        
+#         # FIXED: Better feedback messages
+#         if is_correct:
+#             if confidence > 0.6:
+#                 message = f"Excellent! You signed '{predicted_word}' perfectly! "
+#             elif confidence > 0.4:
+#                 message = f"Good! You signed '{predicted_word}' correctly! "
+#             else:
+#                 message = f"Correct but try to be clearer with '{predicted_word}' "
+#         else:
+#             if confidence > 0.5:
+#                 message = f"AI confidently detected '{predicted_word}' but expected '{target_word}'. Try the correct gesture!"
+#             else:
+#                 message = f"AI detected '{predicted_word}' (low confidence) but expected '{target_word}'. Practice the gesture more clearly!"
+        
+#         # Prepare response
+#         response = {
+#             "is_correct": is_correct,
+#             "predicted_word": predicted_word,
+#             "confidence": confidence,
+#             "points": points,
+#             "top_predictions": top_predictions,
+#             "message": message,  # FIXED: Use the detailed message from above
+#             "debug_info": {
+#                 "total_frames": len(frames),
+#                 "landmark_frames": valid_frames,
+#                 "processed_frames": len(landmarks_sequence),
+#                 "method": "multi_frame_landmark_extraction",
+#                 "sequence_length": SEQUENCE_LENGTH,
+#                 "confidence_threshold": CONFIDENCE_THRESHOLD,
+#                 "all_predictions": [(pred["word"], round(pred['confidence'], 3)) for pred in top_predictions]
+#             }
+#         }
+        
+#         logger.info(f"ðŸŽ¯ Target: '{target_word}' | Predicted: '{predicted_word}' ({confidence:.3f}) - {'âœ… Correct' if is_correct else 'âŒ Incorrect'}")
+        
+#         # FIXED: Separate the complex formatting to avoid f-string nesting issues
+#         top_3_formatted = [(p['word'], f"{p['confidence']:.3f}") for p in top_predictions[:3]]
+#         logger.info(f"ðŸ“Š Top 3 predictions: {top_3_formatted}")
+        
+#         return jsonify(response)
+        
+#     except Exception as e:
+#         logger.error(f"âŒ Prediction error: {e}")
+#         import traceback
+#         traceback.print_exc()
+        
+#         return jsonify({
+#             "is_correct": False,
+#             "message": f"Prediction failed: {str(e)}",
+#             "confidence": 0,
+#             "debug_info": {
+#                 "error": str(e),
+#                 "method": "multi_frame_landmark_extraction"
+#             }
+#         }), 500
+@app.route('/api/predict', methods=['POST', 'OPTIONS'])
 def predict_gesture():
-    """NEW: Multi-frame prediction endpoint that frontend expects"""
+    """Redirect to predict_landmarks endpoint for compatibility"""
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    # Redirect POST requests to the landmarks endpoint
+    return predict_from_landmarks()
+
+@app.route('/api/predict_landmarks', methods=['POST', 'OPTIONS'])
+def predict_from_landmarks():
+    """
+    NEW ENDPOINT: Accept landmarks directly from frontend
+    No frame extraction needed - uses frontend-extracted landmarks!
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+    
     if not MODEL_LOADED:
         return jsonify({
             "is_correct": False,
-            "message": "Model not loaded. Check server logs.",
+            "message": "Model not loaded",
             "confidence": 0
         }), 503
 
     try:
         data = request.json
-        target_word = data.get('target_word', '')
-        frames = data.get('frames', [])
+        target_word = data.get('target_word', '').lower()
+        landmarks_sequence = data.get('landmarks', [])
         
-        logger.info(f"ðŸŽ¯ Received prediction request for '{target_word}' with {len(frames)} frames")
+        logger.info(f" Received LANDMARKS for '{target_word}': {len(landmarks_sequence)} frames")
         
-        if not frames:
+        if len(landmarks_sequence) < 10:
             return jsonify({
                 "is_correct": False,
-                "message": "No frames provided",
+                "message": "Not enough frames provided",
                 "confidence": 0
             }), 400
         
-        # Process frames to extract landmarks
-        landmarks_sequence = []
-        valid_frames = 0
+        # Convert to numpy array
+        landmarks_array = np.array(landmarks_sequence, dtype=np.float32)
         
-        for i, frame_base64 in enumerate(frames):
-            try:
-                # Remove data URL prefix if present
-                if 'data:image' in frame_base64:
-                    frame_base64 = frame_base64.split(',')[1]
-                
-                frame_data = base64.b64decode(frame_base64)
-                nparr = np.frombuffer(frame_data, np.uint8)
-                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                
-                if frame is not None:
-                    frame = cv2.resize(frame, (640, 480))
-                    landmark_vector, hands_detected, _ = landmark_extractor.extract_hand_landmarks(frame)
-                    
-                    if hands_detected > 0:
-                        landmarks_sequence.append(landmark_vector)
-                        valid_frames += 1
-                    else:
-                        landmarks_sequence.append(np.zeros(FEATURE_DIM))
-                        
-            except Exception as e:
-                logger.error(f"Error processing frame {i}: {e}")
-                landmarks_sequence.append(np.zeros(FEATURE_DIM))
-        
-        logger.info(f"ðŸ“Š Processed {len(landmarks_sequence)} frames, {valid_frames} with hands detected")
-        
-        # FIXED: Reduced from 5 to 2 frames minimum for better recognition
-        if valid_frames < 2:  
-            return jsonify({
-                "is_correct": False,
-                "message": f"Not enough hand detection. Only {valid_frames} valid frames found. Keep hands visible!",
-                "confidence": 0,
-                "debug_info": {
-                    "total_frames": len(frames),
-                    "valid_frames": valid_frames,
-                    "method": "multi_frame_landmark_extraction"
-                }
-            })
-        
-        # Ensure we have exactly SEQUENCE_LENGTH frames
-        if len(landmarks_sequence) > SEQUENCE_LENGTH:
+        # Ensure exactly SEQUENCE_LENGTH frames
+        if len(landmarks_array) > SEQUENCE_LENGTH:
             # Sample uniformly
-            indices = np.linspace(0, len(landmarks_sequence)-1, SEQUENCE_LENGTH, dtype=int)
-            landmarks_sequence = [landmarks_sequence[i] for i in indices]
-        elif len(landmarks_sequence) < SEQUENCE_LENGTH:
+            indices = np.linspace(0, len(landmarks_array)-1, SEQUENCE_LENGTH, dtype=int)
+            landmarks_array = landmarks_array[indices]
+        elif len(landmarks_array) < SEQUENCE_LENGTH:
             # Pad with last frame
-            while len(landmarks_sequence) < SEQUENCE_LENGTH:
-                landmarks_sequence.append(landmarks_sequence[-1] if landmarks_sequence else np.zeros(FEATURE_DIM))
+            padding = np.repeat(landmarks_array[-1:], SEQUENCE_LENGTH - len(landmarks_array), axis=0)
+            landmarks_array = np.vstack([landmarks_array, padding])
         
-        # Convert to numpy array and normalize
-        sequence_array = np.array(landmarks_sequence, dtype=np.float32)
-        sequence_flat = sequence_array.reshape(-1, FEATURE_DIM)
+        # Normalize using scaler
+        sequence_flat = landmarks_array.reshape(-1, FEATURE_DIM)
         sequence_normalized = SCALER.transform(sequence_flat)
         sequence_processed = sequence_normalized.reshape(1, SEQUENCE_LENGTH, FEATURE_DIM)
         
-        # Make prediction
+        # Predict
         prediction_probs = MODEL.predict(sequence_processed, verbose=0)[0]
         
         # Get top predictions
@@ -428,77 +564,59 @@ def predict_gesture():
         predicted_word = best_prediction["word"]
         confidence = best_prediction["confidence"]
         
-        # Check if prediction is correct
+        # Check if correct
         is_correct = predicted_word.lower() == target_word.lower()
         
-        # FIXED: More lenient scoring system
+        # Calculate points
         points = 0
         if is_correct:
-            if confidence > 0.5:  # High confidence
+            if confidence > 0.5:
                 base_points = 15
                 confidence_bonus = int(confidence * 10)
                 points = base_points + confidence_bonus
-            elif confidence > 0.3:  # Medium confidence  
+            elif confidence > 0.3:
                 points = 10
-            else:  # Low confidence but still correct
+            else:
                 points = 5
         
-        # FIXED: Better feedback messages
+        # Message
         if is_correct:
             if confidence > 0.6:
-                message = f"Excellent! You signed '{predicted_word}' perfectly! ðŸŽ‰"
+                message = f"Excellent! You signed '{predicted_word}' perfectly!"
             elif confidence > 0.4:
-                message = f"Good! You signed '{predicted_word}' correctly! ðŸ‘"
+                message = f"Good! You signed '{predicted_word}' correctly!"
             else:
-                message = f"Correct but try to be clearer with '{predicted_word}' âœ…"
+                message = f"Correct! '{predicted_word}' recognized!"
         else:
-            if confidence > 0.5:
-                message = f"AI confidently detected '{predicted_word}' but expected '{target_word}'. Try the correct gesture!"
-            else:
-                message = f"AI detected '{predicted_word}' (low confidence) but expected '{target_word}'. Practice the gesture more clearly!"
+            message = f"Try again! AI detected '{predicted_word}' but expected '{target_word}'"
         
-        # Prepare response
-        response = {
+        # Log
+        logger.info(f" Target: '{target_word}' | Predicted: '{predicted_word}' ({confidence:.3f}) - {'✅' if is_correct else '❌'}")
+        logger.info(" Top 3: %s", [(p['word'], "{:.3f}".format(p['confidence'])) for p in top_predictions[:3]])
+        
+        return jsonify({
             "is_correct": is_correct,
             "predicted_word": predicted_word,
             "confidence": confidence,
             "points": points,
-            "top_predictions": top_predictions,
-            "message": message,  # FIXED: Use the detailed message from above
+            "message": message,
+            "top_predictions": top_predictions[:3],
             "debug_info": {
-                "total_frames": len(frames),
-                "landmark_frames": valid_frames,
-                "processed_frames": len(landmarks_sequence),
-                "method": "multi_frame_landmark_extraction",
-                "sequence_length": SEQUENCE_LENGTH,
-                "confidence_threshold": CONFIDENCE_THRESHOLD,
-                "all_predictions": [(pred["word"], round(pred['confidence'], 3)) for pred in top_predictions]
+                "method": "direct_landmarks",
+                "frames_received": len(landmarks_sequence),
+                "frames_used": SEQUENCE_LENGTH
             }
-        }
-        
-        logger.info(f"ðŸŽ¯ Target: '{target_word}' | Predicted: '{predicted_word}' ({confidence:.3f}) - {'âœ… Correct' if is_correct else 'âŒ Incorrect'}")
-        
-        # FIXED: Separate the complex formatting to avoid f-string nesting issues
-        top_3_formatted = [(p['word'], f"{p['confidence']:.3f}") for p in top_predictions[:3]]
-        logger.info(f"ðŸ“Š Top 3 predictions: {top_3_formatted}")
-        
-        return jsonify(response)
+        })
         
     except Exception as e:
-        logger.error(f"âŒ Prediction error: {e}")
+        logger.error(f"❌ Prediction error: {e}")
         import traceback
         traceback.print_exc()
-        
         return jsonify({
             "is_correct": False,
-            "message": f"Prediction failed: {str(e)}",
-            "confidence": 0,
-            "debug_info": {
-                "error": str(e),
-                "method": "multi_frame_landmark_extraction"
-            }
+            "message": f"Server error: {str(e)}",
+            "confidence": 0
         }), 500
-
 
 @app.route('/api/predict/sign', methods=['POST'])
 def predict_sign():
@@ -579,7 +697,7 @@ def search():
     
     # Ensure we have words available
     if not MODEL_LOADED or not LABELS_MAP:
-        logger.warning("ðŸš¨ Search called but no words available - using defaults")
+        logger.warning(" Search called but no words available - using defaults")
         default_words = ["hello", "thank you", "yes", "no", "please", "sorry", "help", "good", "about", "accept"]
         
         return jsonify({
@@ -597,7 +715,7 @@ def search():
     
     # Get all available words
     all_words = list(LABELS_MAP.values())
-    logger.info(f"ðŸ” Search endpoint called - {len(all_words)} words available")
+    logger.info(f" Search endpoint called - {len(all_words)} words available")
     
     # Extract search term from request
     search_term = ""
@@ -673,7 +791,7 @@ def get_words():
     """Get all available words - FRONTEND COMPATIBLE"""
     if LABELS_MAP and MODEL_LOADED:
         words = sorted(list(LABELS_MAP.values()))
-        logger.info(f"ðŸ“ /api/words - returning {len(words)} words")
+        logger.info(f" /api/words - returning {len(words)} words")
         
         return jsonify({
             "success": True,
@@ -956,7 +1074,7 @@ def debug_landmarks():
         if not frames:
             return jsonify({"error": "No frames provided"}), 400
 
-        logger.info(f"ðŸ” DEBUGGING landmark extraction for {len(frames)} frames...")
+        logger.info(f"DEBUGGING landmark extraction for {len(frames)} frames...")
         
         debug_info = {
             "total_frames": len(frames),
@@ -1075,7 +1193,7 @@ def debug_landmarks():
             "landmark_std": float(np.std(landmarks_array[landmarks_array != 0]))
         }
         
-        logger.info(f"ðŸ” DEBUG SUMMARY:")
+        logger.info(f" DEBUG SUMMARY:")
         logger.info(f"   - Hands detected in {frames_with_hands}/{len(frames)} frames")
         logger.info(f"   - Average confidence: {debug_info['hand_detection_stats']['average_confidence']:.3f}")
         logger.info(f"   - Coordinate ranges: X[{debug_info['coordinate_ranges']['x_min']:.3f}, {debug_info['coordinate_ranges']['x_max']:.3f}]")
@@ -1088,7 +1206,7 @@ def debug_landmarks():
         })
         
     except Exception as e:
-        logger.error(f"âŒ Debug landmarks error: {e}")
+        logger.error(f" Debug landmarks error: {e}")
         return jsonify({"error": f"Debug failed: {str(e)}"}), 500
 
 
@@ -1148,14 +1266,14 @@ def test_model():
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint for ECS"""
+    """Health check endpoint"""
     return jsonify({
         "success": True,
         "status": "healthy",
         "model_loaded": MODEL_LOADED,
         "timestamp": datetime.now().isoformat(),
         "total_classes": len(LABELS_MAP) if LABELS_MAP else 0
-    }), 200
+    })
 
 
 # Debug endpoint for troubleshooting
@@ -1212,7 +1330,7 @@ def debug_endpoint():
 
 
 if __name__ == '__main__':
-    print("ðŸš€ Starting FIXED Sign Language Recognition Server...")
+    print(" Starting FIXED Sign Language Recognition Server...")
     print("="*70)
     
     # Load MLOps artifacts with detailed feedback
@@ -1220,24 +1338,24 @@ if __name__ == '__main__':
         word_count = len(LABELS_MAP) if LABELS_MAP else 0
         sample_words = list(LABELS_MAP.values())[:10] if LABELS_MAP else []
         
-        print(f"âœ… Server ready with {word_count} sign classes")
-        print(f"ðŸ“ Sample words: {sample_words}")
-        print(f"ðŸŽ¯ Model loaded: {MODEL_LOADED}")
-        print(f"ðŸŽ¯ Scaler loaded: {SCALER is not None}")
+        print(f"Server ready with {word_count} sign classes")
+        print(f" Sample words: {sample_words}")
+        print(f" Model loaded: {MODEL_LOADED}")
+        print(f" Scaler loaded: {SCALER is not None}")
         print("="*70)
-        print("ðŸŒ Available endpoints:")
-        print("   ðŸ“Š Status: http://localhost:5000/api/status")
-        print("   ðŸ” Search: http://localhost:5000/api/search")
-        print("   ðŸ“ Words: http://localhost:5000/api/words")
-        print("   ðŸŽ¯ Predict: http://localhost:5000/api/predict")
-        print("   ðŸŽ¬ Videos: http://localhost:5000/videos/<filename>")
-        print("   ðŸ”§ Debug: http://localhost:5000/api/debug")
-        print("   â¤ï¸  Health: http://localhost:5000/health")
+        print(" Available endpoints:")
+        print("   Status: http://localhost:5000/api/status")
+        print("   Search: http://localhost:5000/api/search")
+        print("    Words: http://localhost:5000/api/words")
+        print("   Predict: http://localhost:5000/api/predict")
+        print("    Videos: http://localhost:5000/videos/<filename>")
+        print("   Debug: http://localhost:5000/api/debug")
+        print("     Health: http://localhost:5000/health")
         print("="*70)
-        print("ðŸŽ¯ Frontend should now work perfectly!")
+        print("¯ Frontend should now work perfectly!")
         print("ðŸš€ Starting Flask server on port 5000...")
         
         app.run(host='0.0.0.0', port=5000, debug=False)
     else:
-        print("âŒ Server startup failed - missing artifacts")
-        print("ðŸ”§ Fix with: python train_model.py --model_type advanced --epochs 200")
+        print(" Server startup failed - missing artifacts")
+        print("Fix with: python train_model.py --model_type advanced --epochs 200")
