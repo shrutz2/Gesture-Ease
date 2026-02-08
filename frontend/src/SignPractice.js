@@ -1,52 +1,48 @@
-// SignPractice.js - COMPLETELY FIXED VERSION
-// Matches EXACT backend landmark extraction
-// Records BLACK SCREEN with ONLY green landmarks (no user video)
-// Removed all emojis and unnecessary buttons
+// SignPractice.js - ULTRA SIMPLE (Training-Style Auto Recording)
+// [CHECK] NO countdown gates
+// [CHECK] NO handsDetected conditions
+// [CHECK] AUTO start when button clicked
+// [CHECK] 30 frames = DONE (exactly like training)
 import React, { useState, useEffect, useRef } from 'react';
 import './SignPractice.css';
 import { saveNpy } from './saveNpy';
 
-const RECORDING_SEC   = 4;
-const FRAME_INTERVAL  = 100;      // 10 fps
-const SEQUENCE_LENGTH = 30;       // Must match backend exactly
-const COUNTDOWN_SEC   = 3;
+const SEQUENCE_LENGTH = 30;
 
 export default function SignPractice({ word, onBack, user, token, refreshUserStats }) {
   const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const landmarksCanvasRef = useRef(null);  // BLACK canvas with ONLY landmarks
+  const landmarksCanvasRef = useRef(null);
   const streamRef = useRef(null);
 
   const [cameraReady, setCameraReady] = useState(false);
-  const [handsDetected, setHandsDetected] = useState(false);
-  const [detectionConf, setDetectionConf] = useState(0);
   const [mediaPipeHands, setMediaPipeHands] = useState(null);
-  const [mediaPipePose, setMediaPipePose] = useState(null);
-
-  const [countdown, setCountdown] = useState(0);
+  const [handsDetected, setHandsDetected] = useState(false);
+  
   const [isRecording, setIsRecording] = useState(false);
   const [isAnalysing, setIsAnalysing] = useState(false);
   const [feedback, setFeedback] = useState(null);
+  const [frameCount, setFrameCount] = useState(0);
+  
+  // [FIRE] NEW: Data collection mode
+  const [dataCollectionMode, setDataCollectionMode] = useState(false);
+  const [recordingsSaved, setRecordingsSaved] = useState(0);
 
-  const [landmarksSequence, setLandmarksSequence] = useState([]);  // 126-dim vectors
-  const [shoulderCenter, setShoulderCenter] = useState({ x: 0.5, y: 0.333 });  // Default
-
-  const liveIntervalRef = useRef(null);
-  const recordingDataRef = useRef({ landmarks: [], frames: [] });
+  // CRITICAL: Buffer WITHOUT any gates
+  const landmarksBufferRef = useRef([]);
+  const isRecordingRef = useRef(false);
+  const frameCountRef = useRef(0);
 
   /* ==========  INITIALIZATION  ========== */
-  useEffect(() => { startCamera(); return cleanup; }, []);
+  useEffect(() => { 
+    startCamera(); 
+    return cleanup; 
+  }, []);
   
   useEffect(() => {
     if (cameraReady) initMediaPipe();
   }, [cameraReady]);
 
-  useEffect(() => {
-    if (mediaPipeHands && mediaPipePose) startLiveDetection();
-    return () => clearInterval(liveIntervalRef.current);
-  }, [mediaPipeHands, mediaPipePose]);
-
-  /* ----------  CAMERA SETUP  ---------- */
+  /* ----------  CAMERA  ---------- */
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -58,344 +54,321 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
         videoRef.current.onloadedmetadata = () => setCameraReady(true);
       }
     } catch (e) {
-      console.error('Camera error:', e);
+      console.error('[ERROR] Camera error:', e);
       alert('Cannot access camera');
     }
   };
 
   const cleanup = () => {
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
-    clearInterval(liveIntervalRef.current);
     if (mediaPipeHands) mediaPipeHands.close();
-    if (mediaPipePose) mediaPipePose.close();
   };
 
-  /* ----------  MEDIAPIPE INITIALIZATION (EXACT MATCH TO BACKEND)  ---------- */
+  /* ----------  MEDIAPIPE HANDS ONLY  ---------- */
   const initMediaPipe = async () => {
-    // Load MediaPipe scripts
+    console.log('[BULLSEYE] Loading MediaPipe Hands...');
+
     const handsScript = document.createElement('script');
     handsScript.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.min.js';
     handsScript.async = true;
-
-    const poseScript = document.createElement('script');
-    poseScript.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.min.js';
-    poseScript.async = true;
 
     const cameraScript = document.createElement('script');
     cameraScript.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.min.js';
     cameraScript.async = true;
 
     document.body.appendChild(handsScript);
-    document.body.appendChild(poseScript);
     document.body.appendChild(cameraScript);
 
     await Promise.all([
       new Promise(resolve => handsScript.onload = resolve),
-      new Promise(resolve => poseScript.onload = resolve),
       new Promise(resolve => cameraScript.onload = resolve)
     ]);
 
-    // Initialize Hands (EXACT backend settings)
+    console.log('[CHECK] MediaPipe Hands loaded');
+
     const hands = new window.Hands({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`
     });
+    
     hands.setOptions({
       maxNumHands: 2,
       modelComplexity: 1,
-      minDetectionConfidence: 0.7,  // Match backend
-      minTrackingConfidence: 0.5    // Match backend
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.5
     });
+    
     hands.onResults(onHandsResults);
     setMediaPipeHands(hands);
 
-    // Initialize Pose (for shoulder detection like backend)
-    const pose = new window.Pose({
-      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
-    });
-    pose.setOptions({
-      modelComplexity: 1,
-      smoothLandmarks: true,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
-    pose.onResults(onPoseResults);
-    setMediaPipePose(pose);
-
-    // Start camera processing
     const camera = new window.Camera(videoRef.current, {
       onFrame: async () => {
         await hands.send({ image: videoRef.current });
-        await pose.send({ image: videoRef.current });
       },
       width: 640,
       height: 480
     });
     camera.start();
+    
+    console.log('[CHECK] Camera started');
   };
 
-  /* ----------  POSE RESULTS (For shoulder center normalization)  ---------- */
-  const onPoseResults = (results) => {
-    if (results.poseLandmarks) {
-      const leftShoulder = results.poseLandmarks[11];
-      const rightShoulder = results.poseLandmarks[12];
-      
-      setShoulderCenter({
-        x: (leftShoulder.x + rightShoulder.x) / 2,
-        y: (leftShoulder.y + rightShoulder.y) / 2
-      });
-    }
-  };
-
-  /* ----------  HANDS RESULTS (EXACT backend processing)  ---------- */
+  /* ----------  onHandsResults - NO GATES  ---------- */
   const onHandsResults = (results) => {
-    // Clear landmarks canvas
-    if (landmarksCanvasRef.current) {
-      const ctx = landmarksCanvasRef.current.getContext('2d');
-      ctx.fillStyle = '#000000';  // BLACK background
-      ctx.fillRect(0, 0, 640, 480);
+    // Draw (always)
+    drawLandmarks(results);
+
+    // Update UI (non-blocking)
+    setHandsDetected(results.multiHandLandmarks?.length > 0);
+
+    // [FIRE] CRITICAL: Record if flag is true (NO OTHER CONDITIONS)
+    if (isRecordingRef.current) {
+      // Extract 126D landmarks
+      const frameLandmarks = new Array(126).fill(0);
+      
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        results.multiHandLandmarks.forEach((hand, handIndex) => {
+          if (handIndex > 1) return;
+          
+          hand.forEach((lm, i) => {
+            const base = handIndex * 63 + i * 3;
+            frameLandmarks[base] = lm.x;
+            frameLandmarks[base + 1] = lm.y;
+            frameLandmarks[base + 2] = lm.z;
+          });
+        });
+      }
+
+      // ALWAYS PUSH (no gates, no conditions)
+      landmarksBufferRef.current.push(frameLandmarks);
+      frameCountRef.current = landmarksBufferRef.current.length;
+      setFrameCount(frameCountRef.current);
+      
+      console.log('[RED] [FRAME]', frameCountRef.current, '/ 30');
+
+      // Stop at 30
+      if (frameCountRef.current >= SEQUENCE_LENGTH) {
+        console.log('[CHECK] 30 frames reached - stopping');
+        stopRecording();
+      }
     }
-
-    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
-      setHandsDetected(false);
-      setDetectionConf(0);
-      return;
-    }
-
-    setHandsDetected(true);
-    setDetectionConf(results.multiHandedness[0].score);
-
-    // Extract landmarks EXACTLY like backend
-    const landmarkVector = extractLandmarksBackendStyle(results);
-    
-    // Draw GREEN landmarks on BLACK canvas
-    drawLandmarksOnly(results);
   };
 
-  /* ----------  EXTRACT LANDMARKS (EXACT BACKEND METHOD)  ---------- */
-  const extractLandmarksBackendStyle = (results) => {
-    const leftHandLandmarks = new Array(63).fill(0);  // 21 landmarks * 3 coords
-    const rightHandLandmarks = new Array(63).fill(0);
+  /* ----------  DRAW  ---------- */
+  const drawLandmarks = (results) => {
+    if (!landmarksCanvasRef.current) return;
 
-    const w = 640;
-    const h = 480;
+    const ctx = landmarksCanvasRef.current.getContext('2d');
+    const canvas = landmarksCanvasRef.current;
     
-    // Use shoulder center for normalization (like backend)
-    const shoulderX = shoulderCenter.x * w;
-    const shoulderY = shoulderCenter.y * h;
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, 640, 480);
 
-    if (results.multiHandLandmarks && results.multiHandedness) {
-      results.multiHandLandmarks.forEach((handLandmarks, idx) => {
-        const handLabel = results.multiHandedness[idx].classification[0].label;
+    if (results.multiHandLandmarks) {
+      results.multiHandLandmarks.forEach((landmarks) => {
+        ctx.strokeStyle = '#00FF00';
+        ctx.lineWidth = 2;
         
-        const landmarks = [];
-        handLandmarks.forEach(lm => {
-          // Convert to pixel coords
-          const x = lm.x * w;
-          const y = lm.y * h;
-          const z = lm.z;
-          
-          // Normalize EXACTLY like backend
-          const x_norm = (x - shoulderX) / w;
-          const y_norm = (y - shoulderY) / h;
-          const z_norm = z;
-          
-          landmarks.push(x_norm, y_norm, z_norm);
+        const connections = [
+          [0,1],[1,2],[2,3],[3,4],
+          [0,5],[5,6],[6,7],[7,8],
+          [0,9],[9,10],[10,11],[11,12],
+          [0,13],[13,14],[14,15],[15,16],
+          [0,17],[17,18],[18,19],[19,20]
+        ];
+
+        connections.forEach(([start, end]) => {
+          const s = landmarks[start];
+          const e = landmarks[end];
+          ctx.beginPath();
+          ctx.moveTo(s.x * 640, s.y * 480);
+          ctx.lineTo(e.x * 640, e.y * 480);
+          ctx.stroke();
         });
 
-        // Assign to correct hand
-        if (handLabel === 'Left') {
-          leftHandLandmarks.splice(0, landmarks.length, ...landmarks);
-        } else {
-          rightHandLandmarks.splice(0, landmarks.length, ...landmarks);
-        }
+        ctx.fillStyle = '#00FF00';
+        landmarks.forEach((lm) => {
+          ctx.beginPath();
+          ctx.arc(lm.x * 640, lm.y * 480, 5, 0, 2 * Math.PI);
+          ctx.fill();
+        });
       });
     }
-
-    // Combine: left + right = 126 features
-    return [...leftHandLandmarks, ...rightHandLandmarks];
   };
 
-  /* ----------  DRAW LANDMARKS ONLY (GREEN dots and lines on BLACK)  ---------- */
-  const drawLandmarksOnly = (results) => {
-    if (!landmarksCanvasRef.current) return;
-    
-    const ctx = landmarksCanvasRef.current.getContext('2d');
-    const w = 640;
-    const h = 480;
-
-    // Hand connections (MediaPipe standard)
-    const HAND_CONNECTIONS = [
-      [0,1],[1,2],[2,3],[3,4],  // Thumb
-      [0,5],[5,6],[6,7],[7,8],  // Index
-      [5,9],[9,10],[10,11],[11,12],  // Middle
-      [9,13],[13,14],[14,15],[15,16],  // Ring
-      [13,17],[17,18],[18,19],[19,20],  // Pinky
-      [0,17]  // Palm
-    ];
-
-    results.multiHandLandmarks.forEach(handLandmarks => {
-      const points = handLandmarks.map(lm => ({
-        x: lm.x * w,
-        y: lm.y * h
-      }));
-
-      // Draw GREEN lines
-      ctx.strokeStyle = '#00FF00';
-      ctx.lineWidth = 2;
-      HAND_CONNECTIONS.forEach(([start, end]) => {
-        ctx.beginPath();
-        ctx.moveTo(points[start].x, points[start].y);
-        ctx.lineTo(points[end].x, points[end].y);
-        ctx.stroke();
-      });
-
-      // Draw GREEN dots
-      ctx.fillStyle = '#00FF00';
-      points.forEach(pt => {
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 4, 0, 2 * Math.PI);
-        ctx.fill();
-      });
-    });
-  };
-
-  /* ----------  LIVE DETECTION (Continuous landmark capture)  ---------- */
-  const startLiveDetection = () => {
-    if (liveIntervalRef.current) return;
-    
-    liveIntervalRef.current = setInterval(() => {
-      // Landmarks are already being captured in onHandsResults
-      // This just maintains the interval
-    }, FRAME_INTERVAL);
-  };
-
-  /* ----------  RECORDING (Capture landmarks for backend)  ---------- */
+  /* ----------  RECORDING - ULTRA SIMPLE  ---------- */
   const startRecording = () => {
-    if (!handsDetected) {
-      alert('Show your hands first');
-      return;
+    console.log('[RED] [START] Recording started immediately');
+    
+    // Clear buffer
+    landmarksBufferRef.current = [];
+    frameCountRef.current = 0;
+    setFrameCount(0);
+    
+    // Set flag (THIS IS THE ONLY GATE)
+    isRecordingRef.current = true;
+    setIsRecording(true);
+    setFeedback(null);
+  };
+
+  const stopRecording = () => {
+    console.log('[STOP_SIGN] [STOP] Recording stopped');
+    
+    // Clear flag
+    isRecordingRef.current = false;
+    setIsRecording(false);
+
+    const landmarks = landmarksBufferRef.current;
+    
+    console.log('[CHECK] Landmarks captured:', landmarks.length);
+    
+    if (landmarks.length > 0) {
+      console.log('[CHECK] Frame shape:', landmarks[0].length);
+      console.log('[CHECK] Non-zero:', landmarks[0].filter(v => v !== 0).length);
     }
 
-    setFeedback(null);
-    setCountdown(COUNTDOWN_SEC);
-    setIsRecording(true);
-
-    // Clear recording buffer
-    recordingDataRef.current = { landmarks: [], frames: [] };
-
-    // Countdown
-    const cd = setInterval(() => {
-      setCountdown(c => {
-        if (c === 1) {
-          clearInterval(cd);
-          return 0;
-        }
-        return c - 1;
-      });
-    }, 1000);
-
-    // After countdown, start actual recording
-    setTimeout(() => {
-      captureRecordingData();
-    }, COUNTDOWN_SEC * 1000);
-  };
-
-  const captureRecordingData = () => {
-    let frameCount = 0;
-    const maxFrames = SEQUENCE_LENGTH;
-    
-    const recordInterval = setInterval(() => {
-      if (frameCount >= maxFrames) {
-        clearInterval(recordInterval);
-        setIsRecording(false);
-        analyzeGesture();
-        return;
-      }
-
-      // Capture current landmark vector
-      if (mediaPipeHands && videoRef.current) {
-        // Get current frame as base64 for backend
-        const frameData = captureFrame();
-        if (frameData) {
-          recordingDataRef.current.frames.push(frameData);
-        }
-      }
-
-      frameCount++;
-    }, FRAME_INTERVAL);
-  };
-
-  const captureFrame = () => {
-    if (!videoRef.current || !canvasRef.current) return null;
-    
-    const ctx = canvasRef.current.getContext('2d');
-    canvasRef.current.width = 640;
-    canvasRef.current.height = 480;
-    ctx.drawImage(videoRef.current, 0, 0, 640, 480);
-    
-    return canvasRef.current.toDataURL('image/jpeg', 0.9);
-  };
-
-  /* ----------  ANALYZE GESTURE (Send to backend)  ---------- */
-  const analyzeGesture = async () => {
-    const { frames } = recordingDataRef.current;
-    
-    if (frames.length < 10) {
+    // Validate
+    if (landmarks.length < 3) {
       setFeedback({ 
         is_correct: false, 
-        message: 'Not enough frames captured. Keep hands visible.' 
+        message: 'Not enough frames captured. Try again.' 
       });
       return;
     }
 
+    // [FIRE] NEW: Check mode
+    if (dataCollectionMode) {
+      saveLandmarks(landmarks);
+    } else {
+      analyzeGesture(landmarks);
+    }
+  };
+
+  /* ----------  SEND TO BACKEND  ---------- */
+  const analyzeGesture = async (landmarks) => {
     setIsAnalysing(true);
-    
+
     try {
-      const res = await fetch('http://localhost:5000/api/predict', {
+      console.log('[OUTBOX_TRAY] Sending:', landmarks.length, 'frames');
+
+      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000'}/api/predict_landmarks`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          frames: frames,
           target_word: word,
-          real_hand_detection: true,
-          enhanced_processing: true
+          landmarks: landmarks
         })
       });
 
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
       const data = await res.json();
+      console.log('[INBOX_TRAY] Full backend response:');
+      console.log('   Target:', data.target_word);
+      console.log('   Is correct:', data.is_correct);
+      console.log('   Target confidence:', (data.target_confidence * 100).toFixed(1) + '%');
+      console.log('   Points:', data.points);
+      console.log('   Message:', data.message);
+      if (data.top_predictions?.length > 0) {
+        console.log('   Top predictions:');
+        data.top_predictions.forEach(p => {
+          console.log(`      ${p.rank}. ${p.gesture}: ${(p.confidence * 100).toFixed(1)}%`);
+        });
+      }
+      
       setFeedback(data);
+      
+      // Save to database
+      if (user?.user_id) {
+        try {
+          await fetch(`${process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000'}/api/attempt`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user_id: user.user_id,
+              target_word: word,
+              is_correct: data.is_correct,
+              target_confidence: data.target_confidence,
+              points: data.points,
+              message: data.message,
+              top_predictions: data.top_predictions
+            })
+          });
+          console.log('[CHECK] Attempt saved to database');
+        } catch (e) {
+          console.error('⚠️ Failed to save attempt:', e);
+        }
+      }
       
       if (data.is_correct && refreshUserStats) {
         refreshUserStats();
       }
     } catch (e) {
-      console.error('Prediction error:', e);
+      console.error('[ERROR] Error:', e);
       setFeedback({ 
         is_correct: false, 
-        message: 'Network error. Please try again.' 
+        message: 'Network error. Try again.' 
       });
     }
     
     setIsAnalysing(false);
   };
 
-  /* ----------  EXPORT LANDMARKS (.npy)  ---------- */
+  /* ----------  SAVE LANDMARKS (Data Collection)  ---------- */
+  const saveLandmarks = async (landmarks) => {
+    setIsAnalysing(true);
+
+    try {
+      console.log('[FLOPPY_DISK] Saving landmarks to dataset:', word, landmarks.length, 'frames');
+
+      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000'}/api/save_landmarks`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          word: word,
+          landmarks: landmarks
+        })
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const data = await res.json();
+      console.log('[CHECK] Saved:', data);
+      
+      setFeedback({
+        is_correct: true,
+        message: `[CHECK] Saved! (${landmarks.length} frames)`,
+        file: data.file
+      });
+      
+      setRecordingsSaved(c => c + 1);
+    } catch (e) {
+      console.error('[ERROR] Save error:', e);
+      setFeedback({ 
+        is_correct: false, 
+        message: 'Failed to save. Check backend.' 
+      });
+    }
+    
+    setIsAnalysing(false);
+  };
   const exportLandmarks = () => {
-    if (landmarksSequence.length === 0) {
-      alert('No landmarks captured yet. Move your hands first.');
+    if (landmarksBufferRef.current.length === 0) {
+      alert('No landmarks. Record first.');
       return;
     }
 
     const filename = `${word}_${Date.now()}.npy`;
     try {
-      saveNpy(landmarksSequence, filename);
-      alert(`Exported ${landmarksSequence.length} frames to ${filename}`);
+      saveNpy(landmarksBufferRef.current, filename);
+      alert(`Exported ${landmarksBufferRef.current.length} frames`);
     } catch (e) {
-      console.error('Export error:', e);
-      alert('Export failed: ' + e.message);
+      alert('Export failed');
     }
   };
 
@@ -403,47 +376,56 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
   return (
     <div className="practice-page">
       <div className="practice-header">
-        <button onClick={onBack} className="back-button">Back</button>
+        <button onClick={onBack} className="back-button">← Back</button>
         <div className="practice-title">
           <h1>Practice: {word}</h1>
           <div className="points-display">
             Level {user?.stats?.level || 1} • {user?.stats?.total_points || 0} points
           </div>
         </div>
+        {/* [FIRE] NEW: Mode toggle */}
+        <div className="mode-toggle">
+          <label>
+            <input 
+              type="checkbox" 
+              checked={dataCollectionMode}
+              onChange={(e) => setDataCollectionMode(e.target.checked)}
+            />
+            [BAR_CHART] Data Collection Mode ({recordingsSaved} saved)
+          </label>
+        </div>
       </div>
 
       <div className="practice-container">
-        {/* Reference Video Panel (LEFT) */}
+        {/* Reference Video */}
         <div className="video-panel">
           <h2>Reference Video</h2>
           <video 
             controls 
             className="reference-video"
-            src={`http://localhost:5000/videos/${word}.mp4`}
-            onError={e => {
-              console.error('Video load error for:', word);
-              e.target.style.display = 'none';
-            }}
+            src={`${process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000'}/videos/${word}.mp4`}
+            onError={e => e.target.style.display = 'none'}
           />
         </div>
 
-        {/* Practice Panel (RIGHT) */}
+        {/* Practice Panel */}
         <div className="camera-panel">
           <h2>Your Practice</h2>
           
-          {/* Status Indicators */}
+          {/* Status */}
           <div className="status-bar">
             <span className={`status-badge ${handsDetected ? 'active' : 'inactive'}`}>
-              {handsDetected ? 'Hands Detected' : 'No Hands'}
+              {handsDetected ? '✓ Hands' : 'No Hands'}
             </span>
-            <span className="confidence-badge">
-              Confidence: {Math.round(detectionConf * 100)}%
-            </span>
+            {isRecording && (
+              <span className="recording-badge">
+                [RED] Recording: {frameCount} / 30
+              </span>
+            )}
           </div>
 
-          {/* Camera Display */}
+          {/* Camera */}
           <div className="camera-container">
-            {/* Hidden video element */}
             <video 
               ref={videoRef} 
               autoPlay 
@@ -452,10 +434,6 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
               style={{ display: 'none' }}
             />
             
-            {/* Hidden canvas for frame capture */}
-            <canvas ref={canvasRef} style={{ display: 'none' }} />
-
-            {/* Landmarks-only display (BLACK with GREEN landmarks) */}
             <canvas 
               ref={landmarksCanvasRef}
               width={640}
@@ -463,51 +441,59 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
               className="landmarks-canvas"
             />
 
-            {/* Countdown Overlay */}
-            {countdown > 0 && (
-              <div className="countdown-overlay">
-                <div className="countdown-number">{countdown}</div>
-                <p>Get Ready</p>
-              </div>
-            )}
-
             {/* Controls */}
             <div className="camera-controls">
               {!isRecording && !isAnalysing && (
                 <button 
                   onClick={startRecording}
                   className="record-button"
-                  disabled={!handsDetected}
                 >
-                  Start Practice
+                  [RED] Start Recording (Auto 30 frames)
+                  {dataCollectionMode && ' - SAVE MODE'}
                 </button>
               )}
 
               {isAnalysing && (
                 <div className="analyzing">
                   <div className="spinner"></div>
-                  <p>Analyzing your sign...</p>
+                  <p>{dataCollectionMode ? 'Saving...' : 'Analyzing...'}</p>
                 </div>
               )}
 
               <button 
                 onClick={exportLandmarks}
                 className="export-button"
+                disabled={landmarksBufferRef.current.length === 0}
               >
-                Export Landmarks
+                Export .npy
               </button>
             </div>
 
             {/* Feedback */}
             {feedback && (
               <div className={`feedback-panel ${feedback.is_correct ? 'success' : 'error'}`}>
-                <h3>{feedback.is_correct ? 'Correct!' : 'Try Again'}</h3>
+                <h3>{feedback.is_correct ? '[CHECK] Correct!' : '[ERROR] Try Again'}</h3>
                 <p>{feedback.message}</p>
+                {feedback.predicted_word && (
+                  <>
+                    <p>Detected: {feedback.predicted_word} ({Math.round(feedback.top_prediction_confidence * 100)}%)</p>
+                    {feedback.top_predictions && feedback.top_predictions.length > 0 && (
+                      <div style={{ fontSize: '12px', color: '#666', marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #ddd' }}>
+                        <p style={{ margin: '5px 0', fontWeight: 'bold' }}>Top 5:</p>
+                        {feedback.top_predictions.map(pred => (
+                          <p key={pred.rank} style={{ margin: '2px 0' }}>
+                            {pred.rank}. {pred.gesture}: {Math.round(pred.confidence * 100)}%
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
                 {feedback.is_correct && feedback.points && (
                   <p className="points-earned">+{feedback.points} points</p>
                 )}
                 <button onClick={() => setFeedback(null)}>
-                  {feedback.is_correct ? 'Next Sign' : 'Retry'}
+                  {feedback.is_correct ? 'Next' : 'Retry'}
                 </button>
               </div>
             )}
@@ -515,23 +501,16 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
         </div>
       </div>
 
-      {/* Tips Section */}
+      {/* Tips */}
       <div className="tips-section">
-        <h3>Tips for Better Recognition</h3>
+        <h3>Tips</h3>
         <ul>
-          <li>Keep both hands clearly visible</li>
-          <li>Use good lighting</li>
-          <li>Plain background works best</li>
-          <li>Match the reference video movements</li>
+          <li>Click "Start Recording" - it will auto-capture 30 frames</li>
+          <li>Keep hands visible during recording</li>
+          <li>Good lighting helps</li>
+          <li>Match reference video movements</li>
         </ul>
       </div>
     </div>
   );
 }
-
-/* Auth Context Hook */
-const useAuth = () => {
-  const ctx = React.useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be inside AuthProvider');
-  return ctx;
-};

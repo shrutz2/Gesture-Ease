@@ -1,0 +1,39 @@
+# Multi-stage build for production
+FROM node:18-alpine AS builder
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+RUN npm run build
+
+# Production stage with nginx
+FROM nginx:alpine
+
+# Security: Remove default nginx user and create app user
+RUN addgroup -g 1001 -S appuser && \
+    adduser -S appuser -G appuser
+
+# Copy built app
+COPY --from=builder /app/build /usr/share/nginx/html
+
+# Copy nginx configuration
+COPY nginx.aws.conf /etc/nginx/conf.d/default.conf
+
+# Security headers and performance optimizations
+RUN chown -R appuser:appuser /usr/share/nginx/html && \
+    chown -R appuser:appuser /var/cache/nginx && \
+    chown -R appuser:appuser /var/log/nginx && \
+    chown -R appuser:appuser /etc/nginx/conf.d
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:3000/health || exit 1
+
+EXPOSE 3000
+
+# Switch to non-root user
+USER appuser
+
+CMD ["nginx", "-g", "daemon off;"]

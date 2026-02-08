@@ -10,7 +10,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 import pickle
 import json
 import logging
-from pathlib import Path
+from pathlib import Path   
 import argparse
 from datetime import datetime
 import os
@@ -40,8 +40,8 @@ class FixedSignLanguageTrainer:
     def __init__(self, config):
         self.config = config
         self.model = None
-        self.history = None
-        
+        self.history = None 
+         
         # Create directories
         self.models_dir = Path(config.get('models_dir', 'models'))
         self.experiments_dir = Path(config.get('experiments_dir', 'experiments'))
@@ -50,7 +50,7 @@ class FixedSignLanguageTrainer:
         
     def build_simple_model(self, num_classes):
         """Build simple but effective model - guaranteed to work"""
-        logger.info(f"🏗️ Building simple effective model for {num_classes} classes...")
+        logger.info(f"[BUILDING_CONSTRUCTION] Building simple effective model for {num_classes} classes...")
         
         model = models.Sequential([
             # Input
@@ -96,12 +96,12 @@ class FixedSignLanguageTrainer:
         )
         
         self.model = model
-        logger.info(f"✅ Simple model built with {model.count_params():,} parameters")
+        logger.info(f"[CHECK] Simple model built with {model.count_params():,} parameters")
         return model
     
     def build_advanced_model(self, num_classes):
         """Build advanced model with proper attention using Functional API"""
-        logger.info(f"🏗️ Building advanced model for {num_classes} classes...")
+        logger.info(f"[BUILDING_CONSTRUCTION] Building advanced model for {num_classes} classes...")
         
         # Input
         inputs = layers.Input(shape=(SEQUENCE_LENGTH, FEATURE_DIM))
@@ -160,7 +160,7 @@ class FixedSignLanguageTrainer:
         )
         
         self.model = model
-        logger.info(f"✅ Advanced model built with {model.count_params():,} parameters")
+        logger.info(f"[CHECK] Advanced model built with {model.count_params():,} parameters")
         return model
     
     def get_callbacks(self):
@@ -210,7 +210,7 @@ class FixedSignLanguageTrainer:
     
     def train(self, X_train, y_train, X_val, y_val, class_weights):
         """Train the model"""
-        logger.info(f"🚀 Starting training for {MAX_EPOCHS} epochs...")
+        logger.info(f"[ROCKET] Starting training for {MAX_EPOCHS} epochs...")
         
         # Convert class weights to the correct format
         class_weight_dict = {i: weight for i, weight in enumerate(class_weights)}
@@ -230,12 +230,12 @@ class FixedSignLanguageTrainer:
             shuffle=True
         )
         
-        logger.info("✅ Training completed!")
+        logger.info("[CHECK] Training completed!")
         return self.history
     
     def evaluate(self, X_test, y_test, label_encoder):
         """Comprehensive model evaluation"""
-        logger.info("📊 Performing evaluation...")
+        logger.info("[BAR_CHART] Performing evaluation...")
         
         # Load best model
         self.model.load_weights(str(self.models_dir / 'best_model.h5'))
@@ -316,11 +316,11 @@ class FixedSignLanguageTrainer:
         plt.savefig(self.models_dir / 'confusion_matrix.png', dpi=300, bbox_inches='tight')
         plt.close()
         
-        logger.info("✅ Confusion matrix plot saved")
+        logger.info("[CHECK] Confusion matrix plot saved")
     
     def save_model_artifacts(self, label_encoder):
         """Save all model artifacts"""
-        logger.info("💾 Saving model artifacts...")
+        logger.info("[FLOPPY_DISK] Saving model artifacts...")
         
         # Save the complete model
         self.model.save(str(self.models_dir / 'model.keras'))
@@ -339,7 +339,7 @@ class FixedSignLanguageTrainer:
         with open(self.models_dir / 'labels.json', 'w') as f:
             json.dump(labels_data, f, indent=2)
         
-        logger.info("✅ Model artifacts saved")
+        logger.info("[CHECK] Model artifacts saved")
 
 
 def load_data(data_dir):
@@ -351,7 +351,7 @@ def load_data(data_dir):
         if not (data_path / file).exists():
             raise FileNotFoundError(f"Missing required file: {data_path / file}")
     
-    logger.info("💾 Loading preprocessed data...")
+    logger.info("[FLOPPY_DISK] Loading preprocessed data...")
     
     X_train = np.load(data_path / "X_train.npy")
     y_train = np.load(data_path / "y_train.npy")
@@ -360,7 +360,7 @@ def load_data(data_dir):
     X_test = np.load(data_path / "X_test.npy")
     y_test = np.load(data_path / "y_test.npy")
     
-    logger.info(f"✅ Data loaded - Train: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}")
+    logger.info(f"[CHECK] Data loaded - Train: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}")
     
     return (X_train, y_train), (X_val, y_val), (X_test, y_test)
 
@@ -404,7 +404,7 @@ def main():
             label_encoder = pickle.load(f)
         
         num_classes = len(label_encoder.classes_)
-        logger.info(f"🎯 Training for {num_classes} classes")
+        logger.info(f"[BULLSEYE] Training for {num_classes} classes")
         
         # Convert to one-hot encoding
         y_train_ohe = to_categorical(y_train, num_classes)
@@ -442,26 +442,26 @@ def main():
         
         # Final summary
         print("\n" + "="*80)
-        print("🎉 TRAINING COMPLETED SUCCESSFULLY! 🎉")
+        print("[PARTY_POPPER] TRAINING COMPLETED SUCCESSFULLY! [PARTY_POPPER]")
         print("="*80)
-        print(f"🎯 Final Test Accuracy: {results['test_accuracy']*100:.2f}%")
+        print(f"[BULLSEYE] Final Test Accuracy: {results['test_accuracy']*100:.2f}%")
         print(f"🥉 Top-3 Accuracy: {results['top3_accuracy']*100:.2f}%")
         if results['top5_accuracy'] > 0:
             print(f"🥇 Top-5 Accuracy: {results['top5_accuracy']*100:.2f}%")
-        print(f"📊 Total Classes: {num_classes}")
-        print(f"💾 Model saved to: {trainer.models_dir.absolute()}")
-        print(f"📈 Training logs: {run_dir.absolute()}")
+        print(f"[BAR_CHART] Total Classes: {num_classes}")
+        print(f"[FLOPPY_DISK] Model saved to: {trainer.models_dir.absolute()}")
+        print(f"[CHART_INCREASING] Training logs: {run_dir.absolute()}")
         
         if results['test_accuracy'] >= 0.90:
-            print("🎉 SUCCESS: Target accuracy of 90%+ achieved!")
+            print("[PARTY_POPPER] SUCCESS: Target accuracy of 90%+ achieved!")
         else:
             print(f"⚠️  Current accuracy: {results['test_accuracy']*100:.1f}%")
-            print("💡 Tips to improve:")
+            print("[LIGHT_BULB] Tips to improve:")
             print("   - Try --model_type advanced")
             print("   - Increase --epochs")
             print("   - More data augmentation")
         
-        print("\n🚀 Next step: Test with the Flask app:")
+        print("\n[ROCKET] Next step: Test with the Flask app:")
         print("   python app.py")
         print("="*80)
         

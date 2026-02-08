@@ -1,5 +1,6 @@
 flask>=2.0
 flask-cors
+flask-sqlalchemy>=3.0
 numpy
 opencv-python-headless
 mediapipe
@@ -8,3 +9,7 @@ scikit-learn
 pillow
 pytest
 h5py
+mysql-connector-python
+pymysql
+python-dotenv
+gunicorn

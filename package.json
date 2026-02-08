@@ -1,0 +1,14 @@
+{
+  "name": "gesture-ease",
+  "version": "1.0.0",
+  "description": "Real-time sign language recognition system with ML backend",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0"
+  }
+}
+

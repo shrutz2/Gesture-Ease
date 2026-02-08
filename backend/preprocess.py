@@ -76,7 +76,7 @@ class EnhancedSignLanguagePreprocessor:
                 invalid_count += 1
                 logger.debug(f"Error loading {filepath}: {e}")
         
-        logger.info(f"✅ Loaded {valid_count} valid sequences, {invalid_count} invalid/failed")
+        logger.info(f"[CHECK] Loaded {valid_count} valid sequences, {invalid_count} invalid/failed")
         
         if not sequences:
             raise ValueError("No valid sequences found! Check your landmark files.")
@@ -143,7 +143,7 @@ class EnhancedSignLanguagePreprocessor:
                 augmented_X.append(aug_sequence)
                 augmented_y.append(label)
         
-        logger.info(f"✅ Augmentation complete: {len(X)} → {len(augmented_X)} sequences")
+        logger.info(f"[CHECK] Augmentation complete: {len(X)} → {len(augmented_X)} sequences")
         return np.array(augmented_X), np.array(augmented_y)
     
     def _augment_sequence(self, sequence, strength=1):
@@ -292,7 +292,7 @@ class EnhancedSignLanguagePreprocessor:
         X_val_normalized = X_val_normalized.reshape(X_val.shape)
         X_test_normalized = X_test_normalized.reshape(X_test.shape)
         
-        logger.info("✅ Normalization completed")
+        logger.info("[CHECK] Normalization completed")
         return X_train_normalized, X_val_normalized, X_test_normalized
     
     def compute_class_weights(self, y_encoded):
@@ -323,7 +323,7 @@ class EnhancedSignLanguagePreprocessor:
         np.save(output_path / "y_val.npy", y_val)
         np.save(output_path / "y_test.npy", y_test)
         
-        logger.info("✅ Processed data saved")
+        logger.info("[CHECK] Processed data saved")
         
         return {
             'X_train': output_path / "X_train.npy",
@@ -361,7 +361,7 @@ class EnhancedSignLanguagePreprocessor:
         with open(artifacts_path / 'labels.json', 'w') as f:
             json.dump(labels_mapping, f, indent=2)
         
-        logger.info("✅ Preprocessing artifacts saved")
+        logger.info("[CHECK] Preprocessing artifacts saved")
         
         return {
             'scaler': artifacts_path / 'scaler.pkl',
@@ -441,21 +441,39 @@ def main():
         args.artifacts_dir, metadata
     )
     
-    logger.info("🎉 Enhanced preprocessing completed successfully!")
+    logger.info("[PARTY_POPPER] Enhanced preprocessing completed successfully!")
+    
+    # [FIRE] CRITICAL SHAPE VERIFICATION
+    print(f"\n" + "="*60)
+    print("SHAPE VERIFICATION (CRITICAL)")
+    print("="*60)
+    print(f"X_train shape: {X_train_norm.shape} -- should be (N, 30, 126)")
+    print(f"y_train shape: {y_train_enc.shape} -- should be (N,)")
+    print(f"X_val shape: {X_val_norm.shape} -- should be (N, 30, 126)")
+    print(f"y_val shape: {y_val_enc.shape} -- should be (N,)")
+    print(f"X_test shape: {X_test_norm.shape} -- should be (N, 30, 126)")
+    print(f"y_test shape: {y_test_enc.shape} -- should be (N,)")
+    print(f"Unique classes in y_train: {np.unique(y_train_enc)}")
+    print(f"Classes mapping: {preprocessor.label_encoder.classes_}")
+    print(f"STOP HERE and verify:")
+    print(f"   - Are shapes correct?")
+    print(f"   - Do classes match videos folder?")
+    print(f"   - NO cancel or orphaned words?")
+    print("="*60)
     
     # Print comprehensive summary
     print(f"\n" + "="*60)
-    print("📊 PREPROCESSING SUMMARY")
+    print("PREPROCESSING SUMMARY")
     print("="*60)
-    print(f"📁 Data directory: {args.output_dir}")
-    print(f"📁 Artifacts directory: {args.artifacts_dir}")
-    print(f"🎯 Total sequences (after filtering & augmentation): {len(X)}")
-    print(f"⏱️  Sequence length: {args.max_sequence_length} frames")
-    print(f"🔢 Feature dimension: {X.shape[-1]} (126 = 2 hands × 21 landmarks × 3 coords)")
-    print(f"🏷️  Total classes: {len(preprocessor.label_encoder.classes_)}")
-    print(f"📊 Train/Val/Test splits: {len(X_train)}/{len(X_val)}/{len(X_test)} samples")
-    print(f"🔄 Augmentation factor: {args.augment_factor}x")
-    print("\n🚀 Next step: Run the training script:")
+    print(f"Data directory: {args.output_dir}")
+    print(f"Artifacts directory: {args.artifacts_dir}")
+    print(f"Total sequences (after filtering & augmentation): {len(X)}")
+    print(f"Sequence length: {args.max_sequence_length} frames")
+    print(f"Feature dimension: {X.shape[-1]} (126 = 2 hands x 21 landmarks x 3 coords)")
+    print(f"Total classes: {len(preprocessor.label_encoder.classes_)}")
+    print(f"Train/Val/Test splits: {len(X_train)}/{len(X_val)}/{len(X_test)} samples")
+    print(f"Augmentation factor: {args.augment_factor}x")
+    print("\nNext step: Run the training script:")
     print("   python train_model.py --data_dir data/processed --artifacts_dir artifacts")
     print("="*60)
 

@@ -231,7 +231,7 @@ def main():
     video_files = []
     for video_file in videos_dir.glob('*.mp4'):
         # Extract word from filename
-        # Format: word.mp4 or word_word(1).mp4
+        # Format: word.mp4 or word_word(1).mp4  
         word = video_file.stem.split('_')[0]
         video_files.append({
             'path': video_file,
@@ -286,15 +286,15 @@ def main():
     df = pd.DataFrame(manifest_data)
     df.to_csv(args.csv_out, index=False)
     
-    logger.info(f"✅ Processing complete!")
-    logger.info(f"📊 Processed: {len(manifest_data)} videos")
-    logger.info(f"📁 Landmarks: {output_dir}")
-    logger.info(f"📋 Manifest: {args.csv_out}")
+    logger.info(f"[CHECK] Processing complete!")
+    logger.info(f"[BAR_CHART] Processed: {len(manifest_data)} videos")
+    logger.info(f"[FILE_FOLDER] Landmarks: {output_dir}")
+    logger.info(f"[CLIPBOARD] Manifest: {args.csv_out}")
     
     # Show class distribution
     if not df.empty:
         class_counts = df['label'].value_counts()
-        logger.info(f"📈 Top words:")
+        logger.info(f"[CHART_INCREASING] Top words:")
         for word, count in class_counts.head(10).items():
             logger.info(f"   {word}: {count} samples")
 

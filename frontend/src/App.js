@@ -1,11 +1,13 @@
+// ULTIMATE FIX: RAW landmarks only, backend handles ALL normalization
+// This matches EXACT training pipeline
 
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import './App.css';
 
-const BACKEND_URL = 'http://localhost:5000';
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
 const API = `${BACKEND_URL}/api`;
 
-// Auth Context
+// Auth Context (unchanged)
 const AuthContext = createContext();
 const useAuth = () => useContext(AuthContext);
 
@@ -57,7 +59,7 @@ const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
-  const refreshUserStats = async () => {};
+  const refreshUserStats = async () => { };
 
   return (
     <AuthContext.Provider value={{ user, token, loading, login, register, logout, refreshUserStats, isAuthenticated: !!user }}>
@@ -66,7 +68,7 @@ const AuthProvider = ({ children }) => {
   );
 };
 
-// Auth Page - NO EMOJIS
+// Auth Page (unchanged)
 const AuthPage = ({ onSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [formData, setFormData] = useState({ username: '', email: '', password: '' });
@@ -156,7 +158,7 @@ const AuthPage = ({ onSuccess }) => {
   );
 };
 
-// Landing Page - NO EMOJIS
+// Landing & Search Pages (unchanged - keeping code short)
 const LandingPage = ({ onGetStarted }) => {
   const [showContent, setShowContent] = useState(false);
   const { user, logout } = useAuth();
@@ -201,7 +203,6 @@ const LandingPage = ({ onGetStarted }) => {
   );
 };
 
-// Search Page - NO EMOJIS
 const SearchPage = ({ onSearch, onProfile }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -217,6 +218,7 @@ const SearchPage = ({ onSearch, onProfile }) => {
     try {
       const response = await fetch(`${API}/words`);
       const data = await response.json();
+      
       if (data.success) {
         setAllWords(data.words || []);
         setResults(data.words || []);
@@ -278,7 +280,7 @@ const SearchPage = ({ onSearch, onProfile }) => {
 
         <div className="results-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '1rem' }}>
           {results.map((word, idx) => (
-            <div key={idx} className="word-card" 
+            <div key={idx} className="word-card"
               onClick={() => onSearch(word)}
               style={{ background: 'white', padding: '1.5rem', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', cursor: 'pointer', transition: 'transform 0.2s', textAlign: 'center' }}>
               <h3 style={{ margin: '0 0 0.5rem 0' }}>{word}</h3>
@@ -293,40 +295,37 @@ const SearchPage = ({ onSearch, onProfile }) => {
   );
 };
 
-
-// PracticePage with BLACK screen + GREEN landmarks ONLY
-
-// PracticePage Component - COMPLETELY FIXED
+// ========================================
+// PRACTICE PAGE - ULTIMATE FIX
+// Send PURE RAW landmarks, backend does ALL normalization
+// ========================================
 const PracticePage = ({ word, onBack }) => {
   const { user, token, refreshUserStats } = useAuth();
-  
-  // Refs
+
   const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const landmarksCanvasRef = useRef(null);  // BLACK canvas for landmarks only
+  const landmarksCanvasRef = useRef(null);
   const streamRef = useRef(null);
   const mediaPipeRef = useRef(null);
-  
-  // State
+
+  // REF-based recording
+  const isRecordingRef = useRef(false);
+  const landmarksBufferRef = useRef([]);
+
   const [cameraReady, setCameraReady] = useState(false);
   const [handsDetected, setHandsDetected] = useState(false);
   const [detectionConf, setDetectionConf] = useState(0);
   const [countdown, setCountdown] = useState(0);
-  const [isRecording, setIsRecording] = useState(false);
+  const [isRecordingUI, setIsRecordingUI] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [feedback, setFeedback] = useState(null);
-  const [recordedFrames, setRecordedFrames] = useState([]);
 
-  const RECORDING_TIME = 5;  // 5 seconds recording
-  const COUNTDOWN_TIME = 3;  // 3 seconds countdown
+  const COUNTDOWN_TIME = 3;
 
-  // Initialize camera
   useEffect(() => {
     startCamera();
     return cleanup;
   }, []);
 
-  // Initialize MediaPipe
   useEffect(() => {
     if (cameraReady) {
       initMediaPipe();
@@ -344,13 +343,14 @@ const PracticePage = ({ word, onBack }) => {
         videoRef.current.onloadedmetadata = () => setCameraReady(true);
       }
     } catch (e) {
-      console.error('Camera error:', e);
+      console.error('[ERROR] Camera error:', e);
       alert('Cannot access camera');
     }
   };
 
   const initMediaPipe = async () => {
-    // Load MediaPipe scripts
+    console.log('[BULLSEYE] Loading MediaPipe Hands ONLY');
+    
     const handsScript = document.createElement('script');
     handsScript.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.min.js';
     handsScript.async = true;
@@ -366,23 +366,23 @@ const PracticePage = ({ word, onBack }) => {
       new Promise(resolve => handsScript.onload = resolve),
       new Promise(resolve => cameraScript.onload = resolve)
     ]);
+    
+    console.log('[CHECK] MediaPipe Hands loaded');
 
-    // Initialize Hands with EXACT backend settings
     const hands = new window.Hands({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`
     });
-    
+
     hands.setOptions({
       maxNumHands: 2,
       modelComplexity: 1,
-      minDetectionConfidence: 0.7,  // EXACT match to backend
-      minTrackingConfidence: 0.5    // EXACT match to backend
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.5
     });
-    
+
     hands.onResults(onHandsResults);
     mediaPipeRef.current = hands;
 
-    // Start camera processing
     const camera = new window.Camera(videoRef.current, {
       onFrame: async () => {
         await hands.send({ image: videoRef.current });
@@ -391,20 +391,20 @@ const PracticePage = ({ word, onBack }) => {
       height: 480
     });
     camera.start();
+    
+    console.log('[CHECK] Camera started');
   };
 
   const onHandsResults = (results) => {
-    // Draw landmarks on BLACK canvas (user video stays HIDDEN)
     if (!landmarksCanvasRef.current) return;
-    
+
     const ctx = landmarksCanvasRef.current.getContext('2d');
     const width = 640;
     const height = 480;
-    
-    // Clear with BLACK background
+
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, width, height);
-    
+
     if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
       setHandsDetected(false);
       setDetectionConf(0);
@@ -414,24 +414,31 @@ const PracticePage = ({ word, onBack }) => {
     setHandsDetected(true);
     setDetectionConf(results.multiHandedness[0].score);
 
-    // Hand connections (MediaPipe standard)
+    // [FIRE] CRITICAL: Extract PURE RAW landmarks (NO normalization)
+    const rawLandmarks = extractPureRawLandmarks(results);
+    
+    // CRITICAL: Check REF
+    if (isRecordingRef.current) {
+      landmarksBufferRef.current.push(rawLandmarks);
+      console.log('[RED] [FRAME]', landmarksBufferRef.current.length);
+    }
+
+    // Draw
     const HAND_CONNECTIONS = [
-      [0,1],[1,2],[2,3],[3,4],  // Thumb
-      [0,5],[5,6],[6,7],[7,8],  // Index
-      [5,9],[9,10],[10,11],[11,12],  // Middle
-      [9,13],[13,14],[14,15],[15,16],  // Ring
-      [13,17],[17,18],[18,19],[19,20],  // Pinky
-      [0,17]  // Palm
+      [0, 1], [1, 2], [2, 3], [3, 4],
+      [0, 5], [5, 6], [6, 7], [7, 8],
+      [5, 9], [9, 10], [10, 11], [11, 12],
+      [9, 13], [13, 14], [14, 15], [15, 16],
+      [13, 17], [17, 18], [18, 19], [19, 20],
+      [0, 17]
     ];
 
-    // Draw GREEN landmarks and connections on BLACK
     results.multiHandLandmarks.forEach(handLandmarks => {
       const points = handLandmarks.map(lm => ({
         x: lm.x * width,
         y: lm.y * height
       }));
 
-      // Draw GREEN lines
       ctx.strokeStyle = '#00FF00';
       ctx.lineWidth = 2;
       HAND_CONNECTIONS.forEach(([start, end]) => {
@@ -441,7 +448,6 @@ const PracticePage = ({ word, onBack }) => {
         ctx.stroke();
       });
 
-      // Draw GREEN dots
       ctx.fillStyle = '#00FF00';
       points.forEach(pt => {
         ctx.beginPath();
@@ -449,6 +455,39 @@ const PracticePage = ({ word, onBack }) => {
         ctx.fill();
       });
     });
+  };
+
+  /* [FIRE] PURE RAW LANDMARKS - NO NORMALIZATION WHATSOEVER */
+  const extractPureRawLandmarks = (results) => {
+    const leftHandLandmarks = new Array(63).fill(0);
+    const rightHandLandmarks = new Array(63).fill(0);
+
+    if (!results.multiHandLandmarks || !results.multiHandedness || results.multiHandLandmarks.length === 0) {
+      return [...leftHandLandmarks, ...rightHandLandmarks];
+    }
+
+    results.multiHandLandmarks.forEach((handLandmarks, idx) => {
+      const handedness = results.multiHandedness[idx];
+      if (!handedness || !handedness.classification || handedness.classification.length === 0) {
+        return;
+      }
+      
+      const handLabel = handedness.classification[0].label;
+      const landmarks = [];
+      
+      // [FIRE] PURE RAW - Direct MediaPipe output (x, y, z)
+      handLandmarks.forEach(lm => {
+        landmarks.push(lm.x, lm.y, lm.z);
+      });
+
+      if (handLabel === 'Left') {
+        leftHandLandmarks.splice(0, landmarks.length, ...landmarks);
+      } else {
+        rightHandLandmarks.splice(0, landmarks.length, ...landmarks);
+      }
+    });
+
+    return [...leftHandLandmarks, ...rightHandLandmarks];
   };
 
   const cleanup = () => {
@@ -460,7 +499,6 @@ const PracticePage = ({ word, onBack }) => {
     }
   };
 
-  // Start recording with countdown
   const startRecording = () => {
     if (!handsDetected) {
       alert('Please show your hands first');
@@ -468,15 +506,12 @@ const PracticePage = ({ word, onBack }) => {
     }
 
     setFeedback(null);
-    setRecordedFrames([]);
     setCountdown(COUNTDOWN_TIME);
 
-    // Countdown
     const countdownInterval = setInterval(() => {
       setCountdown(c => {
         if (c === 1) {
           clearInterval(countdownInterval);
-          // Start actual recording after countdown
           setTimeout(() => startActualRecording(), 100);
           return 0;
         }
@@ -486,46 +521,45 @@ const PracticePage = ({ word, onBack }) => {
   };
 
   const startActualRecording = () => {
-    setIsRecording(true);
-    const frames = [];
-    const frameInterval = 100; // 10 fps
-    const totalFrames = (RECORDING_TIME * 1000) / frameInterval;
+    console.log('[RED] [START] Recording...');
+    
+    landmarksBufferRef.current = [];
+    isRecordingRef.current = true;
+    setIsRecordingUI(true);
 
-    let capturedFrames = 0;
+    // 5 seconds for 30+ frames
+    setTimeout(() => {
+      isRecordingRef.current = false;
+      setIsRecordingUI(false);
 
-    const captureInterval = setInterval(() => {
-      const frame = captureFrame();
-      if (frame) {
-        frames.push(frame);
-        capturedFrames++;
+      const landmarks = landmarksBufferRef.current;
+      console.log('[CHECK] Landmarks captured:', landmarks.length);
+
+      if (landmarks.length > 0) {
+        console.log('[CHECK] Landmarks captured:', landmarks.length, 'frames x', landmarks[0].length, 'features');
       }
 
-      if (capturedFrames >= totalFrames) {
-        clearInterval(captureInterval);
-        setIsRecording(false);
-        setRecordedFrames(frames);
-        // Auto-analyze after recording
-        analyzeGesture(frames);
-      }
-    }, frameInterval);
+      analyzeGesture(landmarks);
+    }, 5000);
   };
 
-  const captureFrame = () => {
-    if (!videoRef.current || !canvasRef.current) return null;
-    
-    const ctx = canvasRef.current.getContext('2d');
-    canvasRef.current.width = 640;
-    canvasRef.current.height = 480;
-    ctx.drawImage(videoRef.current, 0, 0, 640, 480);
-    
-    return canvasRef.current.toDataURL('image/jpeg', 0.9);
-  };
-
-  const analyzeGesture = async (frames) => {
-    if (!frames || frames.length < 10) {
+  const analyzeGesture = async (landmarks) => {
+    // [FIRE] CRITICAL FIX 1: Validate word prop BEFORE sending
+    if (!word || word === 'undefined') {
+      console.error('[ERROR] ERROR: word prop is undefined!');
       setFeedback({
         is_correct: false,
-        message: 'Not enough frames captured. Please try again.',
+        message: 'Error: No target word specified',
+        confidence: 0
+      });
+      setIsAnalyzing(false);
+      return;
+    }
+
+    if (!landmarks || landmarks.length < 3) {
+      setFeedback({
+        is_correct: false,
+        message: 'Not enough frames. Keep hands visible.',
         confidence: 0
       });
       return;
@@ -534,17 +568,19 @@ const PracticePage = ({ word, onBack }) => {
     setIsAnalyzing(true);
 
     try {
-      const response = await fetch(`${API}/predict`, {
+      console.log('[OUTBOX_TRAY] Sending to backend:');
+      console.log('   Target word:', word);  // Should NOT be undefined!
+      console.log('   Landmarks:', landmarks.length, 'frames');
+      
+      const response = await fetch(`${API}/predict_landmarks`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          frames: frames,
-          target_word: word,
-          real_hand_detection: true,
-          enhanced_processing: true
+          target_word: word,  // This MUST be valid string
+          landmarks: landmarks  // PURE RAW - backend will normalize
         })
       });
 
@@ -553,16 +589,31 @@ const PracticePage = ({ word, onBack }) => {
       }
 
       const result = await response.json();
+      // Log full response with new verification logic
+      console.log('[CHECK] Backend response received:');
+      console.log('   Target word:', result.target_word);
+      console.log('   Is correct:', result.is_correct);
+      console.log('   Target confidence:', (result.target_confidence * 100).toFixed(1) + '%');
+      console.log('   Points awarded:', result.points);
+      console.log('   Message:', result.message);
+      if (result.top_predictions && result.top_predictions.length > 0) {
+        console.log('   Top predictions:');
+        result.top_predictions.forEach(pred => {
+          console.log(`      ${pred.rank}. ${pred.gesture}: ${(pred.confidence * 100).toFixed(1)}%`);
+        });
+      }
+      console.log('   Debug - Target rank:', result.debug?.target_rank);
+      
       setFeedback(result);
 
       if (result.is_correct && refreshUserStats) {
         refreshUserStats();
       }
     } catch (error) {
-      console.error('Prediction error:', error);
+      console.error('[ERROR] Prediction error:', error);
       setFeedback({
         is_correct: false,
-        message: 'Network error. Please check backend connection.',
+        message: 'Network error.',
         confidence: 0
       });
     } finally {
@@ -572,7 +623,6 @@ const PracticePage = ({ word, onBack }) => {
 
   const resetPractice = () => {
     setFeedback(null);
-    setRecordedFrames([]);
   };
 
   return (
@@ -587,66 +637,52 @@ const PracticePage = ({ word, onBack }) => {
       </div>
 
       <div className="practice-container">
-        {/* Reference Video Panel (LEFT) */}
         <div className="video-panel">
           <h2>Reference Video</h2>
-          <p>Watch and learn the sign</p>
-          <video 
-            controls 
+          <video
+            controls
             className="reference-video"
             src={`${BACKEND_URL}/videos/${word.toLowerCase()}.mp4`}
-            onError={(e) => {
-              console.error('Video load error for:', word);
-              e.target.style.display = 'none';
-            }}
+            onError={(e) => e.target.style.display = 'none'}
           />
         </div>
 
-        {/* Practice Panel (RIGHT) */}
         <div className="camera-panel">
           <h2>Your Practice</h2>
-          <p>Perform the sign when ready</p>
 
-          {/* Status Badges */}
           <div className="status-bar" style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginBottom: '1rem' }}>
-            <span style={{ 
-              padding: '8px 16px', 
-              borderRadius: '20px', 
-              fontSize: '14px', 
+            <span style={{
+              padding: '8px 16px',
+              borderRadius: '20px',
+              fontSize: '14px',
               fontWeight: '600',
               background: handsDetected ? '#4caf50' : '#f44336',
               color: 'white'
             }}>
-              {handsDetected ? 'Hands Detected' : 'No Hands'}
+              {handsDetected ? '✓ Hands' : 'No Hands'}
             </span>
-            <span style={{ 
-              padding: '8px 16px', 
-              borderRadius: '20px', 
-              fontSize: '14px', 
+            <span style={{
+              padding: '8px 16px',
+              borderRadius: '20px',
+              fontSize: '14px',
               fontWeight: '600',
               background: 'rgba(255,255,255,0.2)',
               color: 'white'
             }}>
-              Confidence: {Math.round(detectionConf * 100)}%
+              {Math.round(detectionConf * 100)}%
             </span>
           </div>
 
-          {/* Camera Container */}
           <div className="camera-container" style={{ position: 'relative' }}>
-            {/* Hidden user video - MediaPipe processes this */}
-            <video 
-              ref={videoRef} 
-              autoPlay 
-              muted 
-              playsInline 
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
               style={{ display: 'none' }}
             />
-            
-            {/* Hidden canvas for frame capture */}
-            <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-            {/* BLACK canvas with GREEN landmarks - THIS IS WHAT USER SEES */}
-            <canvas 
+            <canvas
               ref={landmarksCanvasRef}
               width={640}
               height={480}
@@ -660,7 +696,6 @@ const PracticePage = ({ word, onBack }) => {
               }}
             />
 
-            {/* Countdown Overlay */}
             {countdown > 0 && (
               <div style={{
                 position: 'absolute',
@@ -676,12 +711,7 @@ const PracticePage = ({ word, onBack }) => {
                 borderRadius: '12px',
                 zIndex: 10
               }}>
-                <div style={{
-                  fontSize: '120px',
-                  fontWeight: 'bold',
-                  color: '#4caf50',
-                  animation: 'pulse 1s ease-in-out'
-                }}>
+                <div style={{ fontSize: '120px', fontWeight: 'bold', color: '#4caf50' }}>
                   {countdown}
                 </div>
                 <p style={{ color: 'white', fontSize: '24px', marginTop: '20px' }}>
@@ -690,10 +720,9 @@ const PracticePage = ({ word, onBack }) => {
               </div>
             )}
 
-            {/* Controls */}
             <div className="camera-controls" style={{ marginTop: '1rem', textAlign: 'center' }}>
-              {!isRecording && !isAnalyzing && (
-                <button 
+              {!isRecordingUI && !isAnalyzing && (
+                <button
                   onClick={startRecording}
                   disabled={!cameraReady || !handsDetected}
                   style={{
@@ -708,19 +737,14 @@ const PracticePage = ({ word, onBack }) => {
                     opacity: (cameraReady && handsDetected) ? 1 : 0.6
                   }}
                 >
-                  Start {RECORDING_TIME}s Recording
+                  Start Recording
                 </button>
               )}
 
-              {isRecording && (
+              {isRecordingUI && (
                 <div style={{ textAlign: 'center', color: 'white' }}>
-                  <div style={{
-                    fontSize: '24px',
-                    fontWeight: 'bold',
-                    color: '#f44336',
-                    animation: 'pulse 1s infinite'
-                  }}>
-                    Recording...
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#f44336' }}>
+                    [RED] Recording... ({landmarksBufferRef.current.length} frames)
                   </div>
                 </div>
               )}
@@ -736,12 +760,11 @@ const PracticePage = ({ word, onBack }) => {
                     animation: 'spin 1s linear infinite',
                     margin: '0 auto 10px auto'
                   }}></div>
-                  <p>Analyzing your sign...</p>
+                  <p>Analyzing...</p>
                 </div>
               )}
             </div>
 
-            {/* Feedback Panel */}
             {feedback && (
               <div style={{
                 position: 'absolute',
@@ -762,9 +785,9 @@ const PracticePage = ({ word, onBack }) => {
                   fontSize: '28px',
                   color: feedback.is_correct ? '#4caf50' : '#f44336'
                 }}>
-                  {feedback.is_correct ? 'Correct' : 'Try Again'}
+                  {feedback.is_correct ? '[CHECK] Correct' : '[ERROR] Try Again'}
                 </h3>
-                
+
                 <p style={{ margin: '10px 0', color: '#333', fontSize: '16px' }}>
                   {feedback.message}
                 </p>
@@ -781,12 +804,24 @@ const PracticePage = ({ word, onBack }) => {
                 )}
 
                 {feedback.predicted_word && !feedback.is_correct && (
-                  <p style={{ fontSize: '14px', color: '#666', marginTop: '10px' }}>
-                    AI detected: "{feedback.predicted_word}"
-                  </p>
+                  <>
+                    <p style={{ fontSize: '14px', color: '#666', marginTop: '10px' }}>
+                      Detected: "{feedback.predicted_word}"
+                    </p>
+                    {feedback.top_predictions && feedback.top_predictions.length > 0 && (
+                      <div style={{ fontSize: '12px', color: '#999', marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #eee' }}>
+                        <p style={{ margin: '5px 0', fontWeight: 'bold' }}>Top 5 predictions:</p>
+                        {feedback.top_predictions.map(pred => (
+                          <p key={pred.rank} style={{ margin: '2px 0' }}>
+                            {pred.rank}. {pred.gesture}: {(pred.confidence * 100).toFixed(1)}%
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
 
-                <button 
+                <button
                   onClick={resetPractice}
                   style={{
                     marginTop: '20px',
@@ -807,60 +842,27 @@ const PracticePage = ({ word, onBack }) => {
           </div>
         </div>
       </div>
-
-      {/* Tips Section */}
-      <div className="tips-section" style={{ 
-        maxWidth: '800px', 
-        margin: '2rem auto', 
-        padding: '20px',
-        background: 'rgba(255,255,255,0.1)',
-        borderRadius: '12px'
-      }}>
-        <h3 style={{ textAlign: 'center', color: 'white', marginBottom: '1rem' }}>
-          Recognition Tips
-        </h3>
-        <ul style={{ 
-          listStyle: 'none', 
-          padding: 0, 
-          display: 'grid', 
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-          gap: '1rem' 
-        }}>
-          <li style={{ color: 'white', padding: '10px', background: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}>
-            • Keep hands clearly visible
-          </li>
-          <li style={{ color: 'white', padding: '10px', background: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}>
-            • Use good lighting
-          </li>
-          <li style={{ color: 'white', padding: '10px', background: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}>
-            • Plain background works best
-          </li>
-          <li style={{ color: 'white', padding: '10px', background: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}>
-            • Match reference video movements
-          </li>
-        </ul>
-      </div>
     </div>
   );
 };
 
-// User Profile Component - NO EMOJIS
+// User Profile
 const UserProfile = ({ onBack }) => {
   const { user, logout } = useAuth();
-  
+
   return (
     <div style={{ minHeight: '100vh', background: '#f8f9fa', padding: '2rem' }}>
       <div style={{ maxWidth: '800px', margin: '0 auto' }}>
         <div style={{ textAlign: 'center', marginTop: '2rem' }}>
-          <h1>User Profile</h1>
+          <h1>Profile</h1>
           <p>Username: {user?.username}</p>
           <p>Email: {user?.email}</p>
-          <button onClick={logout} style={{ 
-            background: '#dc3545', 
-            color: 'white', 
-            border: 'none', 
-            padding: '12px 24px', 
-            borderRadius: '6px', 
+          <button onClick={logout} style={{
+            background: '#dc3545',
+            color: 'white',
+            border: 'none',
+            padding: '12px 24px',
+            borderRadius: '6px',
             cursor: 'pointer',
             marginTop: '1rem'
           }}>
@@ -872,7 +874,7 @@ const UserProfile = ({ onBack }) => {
   );
 };
 
-// Main App Component
+// Main App
 function App() {
   const [currentPage, setCurrentPage] = useState('landing');
   const [currentWord, setCurrentWord] = useState('');
@@ -880,7 +882,7 @@ function App() {
   return (
     <AuthProvider>
       <div className="App">
-        <AuthWrapper 
+        <AuthWrapper
           currentPage={currentPage}
           currentWord={currentWord}
           setCurrentPage={setCurrentPage}
@@ -891,7 +893,7 @@ function App() {
   );
 }
 
-// Auth Wrapper Component
+// Auth Wrapper
 const AuthWrapper = ({ currentPage, currentWord, setCurrentPage, setCurrentWord }) => {
   const { user, loading, isAuthenticated } = useAuth();
 
@@ -904,25 +906,25 @@ const AuthWrapper = ({ currentPage, currentWord, setCurrentPage, setCurrentWord 
   };
 
   const handleAuthSuccess = () => setCurrentPage('search');
-  const handleSearch = (word) => { 
-    setCurrentWord(word); 
-    setCurrentPage('practice'); 
+  const handleSearch = (word) => {
+    setCurrentWord(word);
+    setCurrentPage('practice');
   };
-  const handleBackToSearch = () => { 
-    setCurrentPage('search'); 
-    setCurrentWord(''); 
+  const handleBackToSearch = () => {
+    setCurrentPage('search');
+    setCurrentWord('');
   };
   const handleProfile = () => setCurrentPage('profile');
   const handleBackFromProfile = () => setCurrentPage('search');
 
   if (loading) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        minHeight: '100vh', 
-        background: '#f8f9fa' 
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        minHeight: '100vh',
+        background: '#f8f9fa'
       }}>
         <div style={{ textAlign: 'center' }}>
           <h2>GestureB</h2>
@@ -933,16 +935,16 @@ const AuthWrapper = ({ currentPage, currentWord, setCurrentPage, setCurrentWord 
   }
 
   switch (currentPage) {
-    case 'auth': 
+    case 'auth':
       return <AuthPage onSuccess={handleAuthSuccess} />;
-    case 'search': 
+    case 'search':
       return isAuthenticated ? <SearchPage onSearch={handleSearch} onProfile={handleProfile} /> : <LandingPage onGetStarted={handleGetStarted} />;
-    case 'practice': 
+    case 'practice':
       return isAuthenticated ? <PracticePage word={currentWord} onBack={handleBackToSearch} /> : <LandingPage onGetStarted={handleGetStarted} />;
-    case 'profile': 
+    case 'profile':
       return isAuthenticated ? <UserProfile onBack={handleBackFromProfile} /> : <LandingPage onGetStarted={handleGetStarted} />;
     case 'landing':
-    default: 
+    default:
       return <LandingPage onGetStarted={handleGetStarted} />;
   }
 };
