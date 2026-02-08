@@ -1,42 +1,28 @@
-# Virtual Environment
-sign_env/
-venv/
-env/
-.env
-
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+env/
+venv/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Node modules
+# Node
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# IDE
+# IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
@@ -45,16 +31,65 @@ Thumbs.db
 # Logs
 *.log
 logs/
+*.log.*
 
-# Models (too large for git)
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Archive folder (optional - uncomment if you want to ignore it)
+# _archive/
+
+# AWS
+.aws/
+*.pem
+
+# Docker
+.dockerignore
+
+# Model files (large)
 *.h5
+*.keras
 *.pkl
-*.npz
+*.npy
 
-# Large data files
-*.mp4
-*.avi
-*.mov
+# Data files
+data/videos/
+data/landmarks/
+experiments/
 
-backend_v2/data/db/
-backend_v2/data/mongodb_data/
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Documentation (keep only main README)
+QUICK_START_DATA_COLLECTION.md
+DATA_COLLECTION_GUIDE.md
+DATA_COLLECTION_DOCUMENTATION_INDEX.md
+DATA_COLLECTION_FLOW_DIAGRAM.md
+DATABASE_SETUP.md
+ARCHITECTURE.md
+ARCHITECTURE_DIAGRAMS.md
+COLLECT_GESTURE_FINAL_SOLUTION.md
+IMPLEMENTATION_COMPLETE.md
+SYSTEM_READY_SUMMARY.md
+VERIFICATION_LOGIC_CORRECTED.md
+_archive/

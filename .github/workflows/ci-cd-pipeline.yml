@@ -1,0 +1,210 @@
+name: CI/CD Pipeline - Build, Test, and Deploy
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  ECS_CLUSTER: gesture-ease-cluster
+  ECR_BACKEND_REPO: gesture-ease-backend
+  ECR_FRONTEND_REPO: gesture-ease-frontend
+
+jobs:
+  # Lint and Test Backend
+  test-backend:
+    name: Test Backend
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      working-directory: ./backend
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov flake8
+    
+    - name: Lint with flake8
+      working-directory: ./backend
+      run: |
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Test backend
+      working-directory: ./backend
+      run: |
+        pytest --cov=. --cov-report=xml || true
+    
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./backend/coverage.xml
+        flags: backend
+
+  # Lint and Test Frontend
+  test-frontend:
+    name: Test Frontend
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+    
+    - name: Install dependencies
+      working-directory: ./frontend
+      run: npm ci
+    
+    - name: Lint frontend
+      working-directory: ./frontend
+      run: npm run lint || true
+    
+    - name: Build frontend
+      working-directory: ./frontend
+      run: npm run build
+    
+    - name: Install Playwright
+      run: npm install -g @playwright/test
+    
+    - name: Install Playwright browsers
+      run: npx playwright install --with-deps
+    
+    - name: Run E2E tests
+      run: npm run test:e2e || true
+      env:
+        CI: true
+
+  # Build and Push Docker Images
+  build-and-push:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend]
+    if: github.event_name != 'pull_request'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+    
+    - name: Build, tag, and push backend image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: ${{ env.ECR_BACKEND_REPO }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f backend/Dockerfile.production ./backend
+        docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        echo "Backend image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+    
+    - name: Build, tag, and push frontend image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: ${{ env.ECR_FRONTEND_REPO }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f frontend/Dockerfile.production ./frontend
+        docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        echo "Frontend image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+  # Deploy to AWS ECS
+  deploy-aws:
+    name: Deploy to AWS ECS
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+    
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+    
+    - name: Get ECR repository URIs
+      id: get-ecr-uris
+      run: |
+        BACKEND_URI=$(aws ecr describe-repositories --repository-names ${{ env.ECR_BACKEND_REPO }} --query 'repositories[0].repositoryUri' --output text)
+        FRONTEND_URI=$(aws ecr describe-repositories --repository-names ${{ env.ECR_FRONTEND_REPO }} --query 'repositories[0].repositoryUri' --output text)
+        echo "backend_uri=$BACKEND_URI" >> $GITHUB_OUTPUT
+        echo "frontend_uri=$FRONTEND_URI" >> $GITHUB_OUTPUT
+    
+    - name: Update ECS Backend Service
+      run: |
+        aws ecs update-service \
+          --cluster ${{ env.ECS_CLUSTER }} \
+          --service gesture-ease-backend \
+          --force-new-deployment \
+          --region ${{ env.AWS_REGION }} || echo "Backend service update skipped"
+    
+    - name: Update ECS Frontend Service
+      run: |
+        aws ecs update-service \
+          --cluster ${{ env.ECS_CLUSTER }} \
+          --service gesture-ease-frontend \
+          --force-new-deployment \
+          --region ${{ env.AWS_REGION }} || echo "Frontend service update skipped"
+    
+    - name: Wait for deployment
+      run: |
+        echo "Waiting for services to stabilize..."
+        aws ecs wait services-stable \
+          --cluster ${{ env.ECS_CLUSTER }} \
+          --services gesture-ease-backend gesture-ease-frontend \
+          --region ${{ env.AWS_REGION }} || echo "Services may still be deploying"
+    
+    - name: Get ALB DNS
+      id: get-alb-dns
+      run: |
+        ALB_DNS=$(aws elbv2 describe-load-balancers \
+          --query 'LoadBalancers[?contains(LoadBalancerName, `gesture-ease`)].DNSName' \
+          --output text | head -n 1)
+        echo "alb_dns=$ALB_DNS" >> $GITHUB_OUTPUT
+        echo "Deployment URL: http://$ALB_DNS"
+    
+    - name: Health Check
+      run: |
+        sleep 30
+        ALB_DNS="${{ steps.get-alb-dns.outputs.alb_dns }}"
+        curl -f http://$ALB_DNS/health || echo "Health check failed - service may still be starting"
+

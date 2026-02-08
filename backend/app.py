@@ -1,50 +1,202 @@
+"""
+Gesture Recognition Backend API
+Flask-based REST API for real-time sign language recognition using BiLSTM model.
+Handles landmark extraction, sequence normalization, and gesture prediction.
+Database: MySQL with SQLAlchemy ORM
+"""
 
 import cv2
 import mediapipe as mp
 import numpy as np
 import tensorflow as tf
 from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
 import base64
 import json
 import pickle
 import logging
+import os
+import traceback
 from pathlib import Path
 from datetime import datetime
 from collections import deque
 import warnings
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 warnings.filterwarnings('ignore')
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Configuration
-SEQUENCE_LENGTH = 30
-FEATURE_DIM = 126
-CONFIDENCE_THRESHOLD = 0.3  # FIXED: Reduced from 0.7 to 0.3 for better recognition
-MIN_HAND_CONFIDENCE = 0.7   # MUST match training exactly!
+# Import database
+from database import db, User, UserProgress, GestureAttempt, LeaderboardEntry
 
-# Global variables for model and preprocessing
+# Model Configuration
+SEQUENCE_LENGTH = 30  # Frames per gesture sequence
+FEATURE_DIM = 126     # 21 landmarks Ã— 2 hands Ã— 3 coordinates
+CONFIDENCE_THRESHOLD = 0.25
+MIN_HAND_CONFIDENCE = 0.5
+SMOOTHING_WINDOW = 5
+# Global model state
 MODEL = None
 SCALER = None
 LABELS_MAP = {}
 MODEL_LOADED = False
 
-# Enhanced frame buffer
+# Frame and prediction buffers for temporal smoothing
 FRAME_BUFFER = deque(maxlen=SEQUENCE_LENGTH)
 PREDICTION_BUFFER = deque(maxlen=5)
 
-# Initialize Flask app with FIXED CORS
 app = Flask(__name__)
 
-# FIXED CORS - Remove duplicate configurations
-CORS(app, 
-     origins=["http://localhost:3000", "http://127.0.0.1:3000"], 
-     allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept"],
-     methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
-     supports_credentials=True)
+# Database Configuration
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'mysql+pymysql://root:password@localhost:3306/gesture_ease')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_size': 10,
+    'pool_recycle': 3600,
+    'pool_pre_ping': True,
+}
+
+# Initialize database
+db.init_app(app)
+
+with app.app_context():
+    try:
+        db.create_all()
+        logger.info("[CHECK] Database connected successfully")
+    except Exception as e:
+        logger.warning(f"⚠️ Database connection warning: {e}")
+
+
+# [FIRE] VERIFICATION HELPER FUNCTION (TARGET-ONLY VERIFICATION)
+def verify_gesture(landmarks_sequence, target_word, model, scaler, labels_map, 
+                   confidence_threshold=0.15):
+    """
+    [CHECK] PURE VERIFICATION LOGIC (NOT classification)
+    
+    Question: "Did user perform TARGET_WORD?"
+    NOT: "What gesture did user perform?"
+    
+    [BULLSEYE] Core principle: 
+    - Ignore what model thinks is "strongest"
+    - Only check if TARGET has enough confidence
+    - User's intention is the source of truth
+    
+    Args:
+        landmarks_sequence: np.array of shape (30, 126)
+        target_word: str - the word to verify
+        model: Trained BiLSTM model
+        scaler: StandardScaler for normalization
+        labels_map: dict mapping indices to gesture names
+        confidence_threshold: minimum confidence to accept target (default 0.15)
+    
+    Returns:
+        dict with verification results
+    """
+    
+    # ---- Step 1: Normalize exactly like training ----
+    landmarks_flat = landmarks_sequence.reshape(-1, 126)
+    landmarks_normalized = scaler.transform(landmarks_flat).reshape(1, 30, 126)
+    
+    # ---- Step 2: Get model predictions ----
+    predictions = model.predict(landmarks_normalized, verbose=0)[0]
+    
+    # ---- Step 3: Find target word index ----
+    target_word_lower = target_word.lower().strip()
+    target_idx = None
+    
+    for idx, word in labels_map.items():
+        if word.lower().strip() == target_word_lower:
+            target_idx = idx
+            break
+    
+    if target_idx is None:
+        return {
+            "is_correct": False,
+            "target_word": target_word,
+            "target_confidence": 0.0,
+            "message": f"[ERROR] Target '{target_word}' not in model labels"
+        }
+    
+    # ---- Step 4: Extract target confidence ONLY ----
+    target_confidence = float(predictions[target_idx])
+    
+    # ---- Step 5: VERIFICATION DECISION ----
+    # Pure comparison: Is target strong enough?
+    is_correct = target_confidence >= confidence_threshold
+    
+    # ---- Step 6: Calculate points ----
+    if is_correct:
+        if target_confidence >= 0.6:
+            points = 15
+        elif target_confidence >= 0.4:
+            points = 10
+        elif target_confidence >= 0.25:
+            points = 5
+        else:
+            points = 3
+    else:
+        points = 0
+    
+    # ---- Step 7: Generate message ----
+    if is_correct:
+        if target_confidence >= 0.6:
+            message = f"[CHECK] Perfect! You signed '{target_word}' very clearly!"
+        elif target_confidence >= 0.4:
+            message = f"[CHECK] Good! I recognized '{target_word}'!"
+        else:
+            message = f"[CHECK] Correct! You performed '{target_word}'!"
+    else:
+        message = f"[ERROR] Try again. '{target_word}' not clear enough."
+    
+    # ---- Step 8: Get top-5 for debugging/logging ----
+    top_k_indices = np.argsort(predictions)[-5:][::-1]
+    top_predictions = []
+    for rank, idx in enumerate(top_k_indices, 1):
+        gesture_name = labels_map.get(idx, f"Unknown_{idx}").lower().strip()
+        confidence = float(predictions[idx])
+        top_predictions.append({
+            "rank": rank,
+            "gesture": gesture_name,
+            "confidence": confidence
+        })
+    
+    return {
+        "is_correct": is_correct,
+        "target_word": target_word,
+        "target_confidence": target_confidence,
+        "message": message,
+        "points": points,
+        "top_predictions": top_predictions
+    }
+
+
+@app.after_request
+def add_cors_headers(response):
+    """Add CORS headers to all responses"""
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS,HEAD'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Max-Age'] = '3600'
+    return response
+
+
+@app.before_request
+def handle_preflight():
+    """Handle CORS preflight requests"""
+    if request.method == 'OPTIONS':
+        response = jsonify()
+        response.status_code = 204
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS,HEAD'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+        return response
 
 class EnhancedLandmarkExtractor:
     """Enhanced landmark extractor matching the training preprocessing"""
@@ -154,13 +306,46 @@ def load_mlops_artifacts():
             model_path = models_dir / model_file
             if model_path.exists():
                 logger.info(f" Loading model from {model_path}...")
-                MODEL = tf.keras.models.load_model(str(model_path))
-                logger.info(" Model loaded successfully")
+                try:
+                    MODEL = tf.keras.models.load_model(str(model_path))
+                    logger.info(" Model loaded successfully")
+                    model_loaded = True
+                    break
+                except ValueError as e:
+                    # Handle models saved with legacy layer configs (e.g. LSTM with
+                    # unsupported kwargs like `time_major`). Try a compatibility
+                    # loader that strips unknown args from LSTM config and retry.
+                    msg = str(e)
+                    logger.warning(f"Model load failed, trying compatibility fallback: {msg}")
+                    if 'Unrecognized keyword arguments passed to LSTM' in msg or 'time_major' in msg:
+                        from tensorflow.keras.layers import LSTM as _KerasLSTM
+
+                        class CompatLSTM(_KerasLSTM):
+                            @classmethod
+                            def from_config(cls, config):
+                                # remove legacy keys that newer Keras does not accept
+                                config.pop('time_major', None)
+                                config.pop('implementation', None)
+                                return super().from_config(config)
+
+                        try:
+                            MODEL = tf.keras.models.load_model(
+                                str(model_path),
+                                custom_objects={'LSTM': CompatLSTM}
+                            )
+                            logger.info(" Model loaded successfully (compatibility mode)")
+                            model_loaded = True
+                            break
+                        except Exception as e2:
+                            logger.error(f"Compatibility load also failed: {e2}")
+                    # re-raise if it's not the expected legacy LSTM issue
+                    logger.error(" Model load failed and compatibility fallback did not succeed")
+                    continue
                 model_loaded = True
                 break
         
         if not model_loaded:
-            logger.error("âŒ No model found")
+            logger.error("Ã¢ÂÅ’ No model found")
             return False
         
         # Load scaler
@@ -168,7 +353,7 @@ def load_mlops_artifacts():
         if scaler_path.exists():
             with open(scaler_path, 'rb') as f:
                 SCALER = pickle.load(f)
-            logger.info("✓ Scaler loaded")
+            logger.info("âœ“ Scaler loaded")
         else:
             logger.error(" Scaler not found")
             return False
@@ -179,7 +364,7 @@ def load_mlops_artifacts():
         # Try word_mappings.json first (has clean words)
         word_mappings_path = artifacts_dir / 'word_mappings.json'
         if word_mappings_path.exists():
-            logger.info(f"‹ Loading clean words from {word_mappings_path}...")
+            logger.info(f"â€¹ Loading clean words from {word_mappings_path}...")
             with open(word_mappings_path, 'r') as f:
                 word_data = json.load(f)
             
@@ -198,7 +383,7 @@ def load_mlops_artifacts():
             
             for labels_path in label_paths:
                 if labels_path.exists():
-                    logger.info(f"ðŸ“‹ Loading labels from {labels_path}...")
+                    logger.info(f"Ã°Å¸â€œâ€¹ Loading labels from {labels_path}...")
                     with open(labels_path, 'r') as f:
                         labels_data = json.load(f)
                     
@@ -219,12 +404,12 @@ def load_mlops_artifacts():
                             LABELS_MAP = {int(k): v.split('_(')[0] if '_(' in v else v 
                                         for k, v in labels_data['classes'].items()}
                     
-                    logger.info(f"âœ… Labels cleaned and loaded: {len(LABELS_MAP)} classes")
+                    logger.info(f"Ã¢Å“â€¦ Labels cleaned and loaded: {len(LABELS_MAP)} classes")
                     labels_loaded = True
                     break
         
         if not labels_loaded:
-            logger.error("âŒ No labels found")
+            logger.error("Ã¢ÂÅ’ No labels found")
             return False
         
         # FIXED: Keep EXACT order from label encoder - DO NOT modify!
@@ -238,7 +423,7 @@ def load_mlops_artifacts():
         return True
         
     except Exception as e:
-        logger.error(f"âŒ Failed to load artifacts: {e}")
+        logger.error(f"Ã¢ÂÅ’ Failed to load artifacts: {e}")
         import traceback
         traceback.print_exc()
         MODEL_LOADED = False
@@ -339,7 +524,7 @@ def smooth_predictions(new_prediction):
 #         target_word = data.get('target_word', '').lower()  # FIXED: correct parameter name
 #         frames = data.get('frames', [])
         
-#         logger.info(f"ðŸŽ¯ Received prediction request for '{target_word}' with {len(frames)} frames")
+#         logger.info(f"Ã°Å¸Å½Â¯ Received prediction request for '{target_word}' with {len(frames)} frames")
         
 #         if not frames:
 #             return jsonify({
@@ -376,7 +561,7 @@ def smooth_predictions(new_prediction):
 #                 logger.error(f"Error processing frame {i}: {e}")
 #                 landmarks_sequence.append(np.zeros(FEATURE_DIM))
         
-#         logger.info(f"ðŸ“Š Processed {len(landmarks_sequence)} frames, {valid_frames} with hands detected")
+#         logger.info(f"Ã°Å¸â€œÅ  Processed {len(landmarks_sequence)} frames, {valid_frames} with hands detected")
         
 #         # FIXED: Reduced from 5 to 2 frames minimum for better recognition
 #         if valid_frames < 2:  
@@ -470,16 +655,16 @@ def smooth_predictions(new_prediction):
 #             }
 #         }
         
-#         logger.info(f"ðŸŽ¯ Target: '{target_word}' | Predicted: '{predicted_word}' ({confidence:.3f}) - {'âœ… Correct' if is_correct else 'âŒ Incorrect'}")
+#         logger.info(f"Ã°Å¸Å½Â¯ Target: '{target_word}' | Predicted: '{predicted_word}' ({confidence:.3f}) - {'Ã¢Å“â€¦ Correct' if is_correct else 'Ã¢ÂÅ’ Incorrect'}")
         
 #         # FIXED: Separate the complex formatting to avoid f-string nesting issues
 #         top_3_formatted = [(p['word'], f"{p['confidence']:.3f}") for p in top_predictions[:3]]
-#         logger.info(f"ðŸ“Š Top 3 predictions: {top_3_formatted}")
+#         logger.info(f"Ã°Å¸â€œÅ  Top 3 predictions: {top_3_formatted}")
         
 #         return jsonify(response)
         
 #     except Exception as e:
-#         logger.error(f"âŒ Prediction error: {e}")
+#         logger.error(f"Ã¢ÂÅ’ Prediction error: {e}")
 #         import traceback
 #         traceback.print_exc()
         
@@ -501,11 +686,57 @@ def predict_gesture():
     # Redirect POST requests to the landmarks endpoint
     return predict_from_landmarks()
 
+
+def normalize_landmark_sequence(landmarks_array, target_length):
+    """
+    PROFESSOR FIX: Simple sequence normalization.
+    - No zeros padding (causes scaler crash)
+    - Repeat last valid frame instead
+    - Matches training distribution
+    """
+    if len(landmarks_array) == 0:
+        raise ValueError("Empty landmark sequence")
+    
+    current_length = len(landmarks_array)
+    
+    if current_length == target_length:
+        return landmarks_array
+    
+    if current_length > target_length:
+        # Too long: uniform sampling
+        indices = np.linspace(0, current_length - 1, target_length, dtype=int)
+        return landmarks_array[indices]
+    else:
+        # Too short: repeat last frame (NOT zeros!)
+        last_frame = landmarks_array[-1]
+        pad_count = target_length - current_length
+        
+        padding = np.repeat(
+            last_frame[np.newaxis, :],
+            pad_count,
+            axis=0
+        )
+        
+        return np.vstack([landmarks_array, padding])
+
+
+def apply_spatial_normalization(landmarks_array):
+    """
+    PROFESSOR FIX: No normalization.
+    Training used RAW landmarks, so we keep them RAW.
+    Scaler handles distribution.
+    """
+    return landmarks_array
+
+
+
 @app.route('/api/predict_landmarks', methods=['POST', 'OPTIONS'])
 def predict_from_landmarks():
     """
-    NEW ENDPOINT: Accept landmarks directly from frontend
-    No frame extraction needed - uses frontend-extracted landmarks!
+    [CHECK] TARGET-ONLY VERIFICATION ENDPOINT
+    
+    Pure verification: Does user's gesture match TARGET_WORD?
+    Ignores model's "strongest prediction" - respects user's intent
     """
     if request.method == 'OPTIONS':
         return '', 200
@@ -514,109 +745,315 @@ def predict_from_landmarks():
         return jsonify({
             "is_correct": False,
             "message": "Model not loaded",
-            "confidence": 0
+            "target_confidence": 0
         }), 503
 
     try:
         data = request.json
-        target_word = data.get('target_word', '').lower()
+        target_word = data.get('target_word', '').lower().strip()
         landmarks_sequence = data.get('landmarks', [])
         
-        logger.info(f" Received LANDMARKS for '{target_word}': {len(landmarks_sequence)} frames")
-        
-        if len(landmarks_sequence) < 10:
+        # [CHECK] Validate target_word
+        if not target_word or target_word == 'undefined' or target_word == 'none':
+            logger.error(f"[ERROR] Invalid target_word received: '{target_word}'")
             return jsonify({
                 "is_correct": False,
-                "message": "Not enough frames provided",
-                "confidence": 0
+                "message": "Invalid target word",
+                "target_confidence": 0
             }), 400
         
-        # Convert to numpy array
+        logger.info(f"[BULLSEYE] Verification request: target='{target_word}', frames={len(landmarks_sequence)}")
+        
+        if len(landmarks_sequence) < 3:
+            return jsonify({
+                "is_correct": False,
+                "message": "Not enough frames",
+                "target_confidence": 0
+            }), 400
+        
+        # Convert and validate landmarks
         landmarks_array = np.array(landmarks_sequence, dtype=np.float32)
         
-        # Ensure exactly SEQUENCE_LENGTH frames
-        if len(landmarks_array) > SEQUENCE_LENGTH:
-            # Sample uniformly
-            indices = np.linspace(0, len(landmarks_array)-1, SEQUENCE_LENGTH, dtype=int)
+        if landmarks_array.shape[1] != 126:
+            logger.error(f"[ERROR] Invalid features: {landmarks_array.shape[1]}")
+            return jsonify({
+                "is_correct": False,
+                "message": "Invalid landmark format",
+                "target_confidence": 0
+            }), 400
+        
+        # [CHECK] Fix sequence length to exactly 30 frames
+        if len(landmarks_array) > 30:
+            indices = np.linspace(0, len(landmarks_array)-1, 30, dtype=int)
             landmarks_array = landmarks_array[indices]
-        elif len(landmarks_array) < SEQUENCE_LENGTH:
-            # Pad with last frame
-            padding = np.repeat(landmarks_array[-1:], SEQUENCE_LENGTH - len(landmarks_array), axis=0)
+        elif len(landmarks_array) < 30:
+            last_frame = landmarks_array[-1]
+            pad_count = 30 - len(landmarks_array)
+            padding = np.repeat(last_frame[np.newaxis, :], pad_count, axis=0)
             landmarks_array = np.vstack([landmarks_array, padding])
         
-        # Normalize using scaler
-        sequence_flat = landmarks_array.reshape(-1, FEATURE_DIM)
-        sequence_normalized = SCALER.transform(sequence_flat)
-        sequence_processed = sequence_normalized.reshape(1, SEQUENCE_LENGTH, FEATURE_DIM)
+        logger.info(f"[CHECK] Sequence normalized: {landmarks_array.shape}")
         
-        # Predict
-        prediction_probs = MODEL.predict(sequence_processed, verbose=0)[0]
+        # [CHECK] PURE TARGET-ONLY VERIFICATION
+        result = verify_gesture(
+            landmarks_array,
+            target_word,
+            MODEL,
+            SCALER,
+            LABELS_MAP,
+            confidence_threshold=0.15  # Lower threshold = more forgiving
+        )
         
-        # Get top predictions
-        top_k_indices = np.argsort(prediction_probs)[::-1][:5]
-        top_predictions = []
-        for i in top_k_indices:
-            label = LABELS_MAP.get(i, f"Unknown_{i}")
-            confidence = float(prediction_probs[i])
-            top_predictions.append({"word": label, "confidence": confidence})
+        logger.info(f"[CHECK] Verification result:")
+        logger.info(f"   is_correct: {result['is_correct']}")
+        logger.info(f"   target: '{target_word}'")
+        logger.info(f"   target_confidence: {result['target_confidence']:.3f}")
+        logger.info(f"   message: {result['message']}")
+        logger.info(f"   points: {result['points']}")
         
-        best_prediction = top_predictions[0]
-        predicted_word = best_prediction["word"]
-        confidence = best_prediction["confidence"]
-        
-        # Check if correct
-        is_correct = predicted_word.lower() == target_word.lower()
-        
-        # Calculate points
-        points = 0
-        if is_correct:
-            if confidence > 0.5:
-                base_points = 15
-                confidence_bonus = int(confidence * 10)
-                points = base_points + confidence_bonus
-            elif confidence > 0.3:
-                points = 10
-            else:
-                points = 5
-        
-        # Message
-        if is_correct:
-            if confidence > 0.6:
-                message = f"Excellent! You signed '{predicted_word}' perfectly!"
-            elif confidence > 0.4:
-                message = f"Good! You signed '{predicted_word}' correctly!"
-            else:
-                message = f"Correct! '{predicted_word}' recognized!"
-        else:
-            message = f"Try again! AI detected '{predicted_word}' but expected '{target_word}'"
-        
-        # Log
-        logger.info(f" Target: '{target_word}' | Predicted: '{predicted_word}' ({confidence:.3f}) - {'✅' if is_correct else '❌'}")
-        logger.info(" Top 3: %s", [(p['word'], "{:.3f}".format(p['confidence'])) for p in top_predictions[:3]])
-        
+        # Return CLEAN response format
         return jsonify({
-            "is_correct": is_correct,
-            "predicted_word": predicted_word,
-            "confidence": confidence,
-            "points": points,
-            "message": message,
-            "top_predictions": top_predictions[:3],
-            "debug_info": {
-                "method": "direct_landmarks",
-                "frames_received": len(landmarks_sequence),
-                "frames_used": SEQUENCE_LENGTH
-            }
-        })
+            "is_correct": result["is_correct"],
+            "target_word": result["target_word"],
+            "target_confidence": round(result["target_confidence"], 3),
+            "message": result["message"],
+            "points": result["points"],
+            "top_predictions": result["top_predictions"]
+        }), 200
         
     except Exception as e:
-        logger.error(f"❌ Prediction error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"[ERROR] Error: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({
             "is_correct": False,
             "message": f"Server error: {str(e)}",
-            "confidence": 0
+            "target_confidence": 0
         }), 500
+
+
+@app.route('/api/attempt', methods=['POST', 'OPTIONS'])
+def save_attempt():
+    """Save gesture attempt to database with user tracking"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    try:
+        data = request.json
+        user_id = data.get('user_id')
+        target_word = data.get('target_word', '').lower().strip()
+        is_correct = data.get('is_correct', False)
+        target_confidence = data.get('target_confidence', 0)
+        points = data.get('points', 0)
+        feedback = data.get('message', '')
+        top_predictions = data.get('top_predictions', [])
+        
+        # Validate user
+        if not user_id:
+            return jsonify({'success': False, 'error': 'User ID required'}), 400
+        
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        
+        # Create gesture attempt record
+        attempt = GestureAttempt(
+            user_id=user_id,
+            target_word=target_word,
+            target_confidence=target_confidence,
+            is_correct=is_correct,
+            points=points,
+            feedback=feedback,
+            top_predictions=json.dumps([p for p in top_predictions[:5]])  # Store top 5
+        )
+        
+        db.session.add(attempt)
+        
+        # Update or create word progress
+        progress = UserProgress.query.filter_by(user_id=user_id, word=target_word).first()
+        if progress:
+            progress.attempts += 1
+            if is_correct:
+                progress.correct += 1
+            progress.confidence = target_confidence
+            progress.updated_at = datetime.utcnow()
+        else:
+            progress = UserProgress(
+                user_id=user_id,
+                word=target_word,
+                attempts=1,
+                correct=1 if is_correct else 0,
+                confidence=target_confidence
+            )
+            db.session.add(progress)
+        
+        db.session.commit()
+        
+        logger.info(f"[CHECK] Attempt saved for user {user.username}: {target_word} - {'Correct' if is_correct else 'Incorrect'}")
+        
+        return jsonify({
+            'success': True,
+            'attempt_id': attempt.id,
+            'points': points,
+            'user_stats': user.get_stats()
+        }), 201
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Error saving attempt: {e}")
+        logger.error(traceback.format_exc())
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/user/<int:user_id>/progress', methods=['GET'])
+def get_user_progress(user_id):
+    """Get user's word progress"""
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        
+        progress = UserProgress.query.filter_by(user_id=user_id).order_by(UserProgress.updated_at.desc()).all()
+        
+        return jsonify({
+            'success': True,
+            'username': user.username,
+            'progress': [p.to_dict() for p in progress]
+        })
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Error getting progress: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/user/<int:user_id>/attempts', methods=['GET'])
+def get_user_attempts(user_id):
+    """Get user's recent gesture attempts"""
+    try:
+        limit = request.args.get('limit', 20, type=int)
+        
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        
+        attempts = GestureAttempt.query.filter_by(user_id=user_id)\
+            .order_by(GestureAttempt.created_at.desc())\
+            .limit(limit).all()
+        
+        return jsonify({
+            'success': True,
+            'username': user.username,
+            'attempts': [a.to_dict() for a in attempts]
+        })
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Error getting attempts: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+def _check_prediction_match(predicted, target, confidence):
+    """Enhanced matching with fuzzy logic for variations"""
+    predicted_lower = predicted.lower().strip()
+    target_lower = target.lower().strip()
+    
+    # Exact match
+    if predicted_lower == target_lower:
+        return True
+    
+    # High confidence partial match (for compound words)
+    if confidence > 0.6:
+        if target_lower in predicted_lower or predicted_lower in target_lower:
+            return True
+    
+    return False
+
+
+def _calculate_quality_points(is_correct, confidence, predicted, target):
+    """Calculate points based on correctness and gesture quality"""
+    if not is_correct:
+        return 0
+    
+    # Base points on confidence
+    if confidence > 0.7:
+        return 20 + int((confidence - 0.7) * 20)  # 20-26 points
+    elif confidence > 0.5:
+        return 15 + int((confidence - 0.5) * 25)  # 15-20 points
+    elif confidence > 0.3:
+        return 10 + int((confidence - 0.3) * 25)  # 10-15 points
+    else:
+        return 5  # Minimum for correct but low confidence
+
+
+def _generate_feedback_message(is_correct, predicted, target, confidence, top_predictions):
+    """Generate contextual feedback based on prediction quality"""
+    if is_correct:
+        if confidence > 0.7:
+            return f"Excellent! Perfect execution of '{predicted}'. Your gesture was clear and accurate."
+        elif confidence > 0.5:
+            return f"Good job! You correctly signed '{predicted}'. Keep practicing for even better accuracy."
+        elif confidence > 0.3:
+            return f"Correct! '{predicted}' was recognized. Try to make your gestures more pronounced for higher confidence."
+        else:
+            return f"'{predicted}' was detected but with low confidence. Focus on clearer hand positioning and movement."
+    else:
+        # Provide helpful feedback for incorrect predictions
+        if confidence > 0.5:
+            return f"The system detected '{predicted}' with high confidence, but you were practicing '{target}'. Review the correct gesture and try again."
+        else:
+            return f"Gesture unclear. The system detected '{predicted}' but expected '{target}'. Ensure your hands are fully visible and perform the complete gesture."
+
+
+def _assess_gesture_quality(landmarks_array, confidence, is_correct):
+    """Assess the quality of the performed gesture"""
+    # Calculate movement magnitude
+    if len(landmarks_array) > 1:
+        movement = np.sum(np.abs(np.diff(landmarks_array, axis=0)))
+        avg_movement = np.mean(movement)
+    else:
+        avg_movement = 0
+    
+    # Assess based on movement and confidence
+    if is_correct and confidence > 0.6:
+        quality = "excellent"
+        feedback = "Your gesture execution was clear and accurate."
+    elif is_correct and confidence > 0.4:
+        quality = "good"
+        feedback = "Good execution. Minor improvements in clarity could increase confidence."
+    elif is_correct:
+        quality = "acceptable"
+        feedback = "Gesture recognized but could be clearer. Focus on complete hand movements."
+    elif confidence > 0.4:
+        quality = "unclear_target"
+        feedback = "Gesture detected but doesn't match target. Review the correct sign."
+    else:
+        quality = "needs_improvement"
+        feedback = "Gesture unclear. Ensure hands are fully visible and perform complete movements."
+    
+    return {
+        "quality": quality,
+        "feedback": feedback,
+        "movement_detected": avg_movement > 0.1,
+        "recommendations": _get_quality_recommendations(quality, avg_movement)
+    }
+
+
+def _get_quality_recommendations(quality, movement):
+    """Get specific recommendations based on quality assessment"""
+    recommendations = []
+    
+    if movement < 0.05:
+        recommendations.append("Increase hand movement - gestures should be more dynamic")
+    
+    if quality in ["needs_improvement", "acceptable"]:
+        recommendations.append("Ensure both hands are fully visible in frame")
+        recommendations.append("Complete the full gesture motion before stopping")
+        recommendations.append("Maintain consistent hand positioning relative to your body")
+    
+    if quality == "unclear_target":
+        recommendations.append("Review the correct sign for this word")
+        recommendations.append("Pay attention to hand shape and finger positions")
+    
+    return recommendations
 
 @app.route('/api/predict/sign', methods=['POST'])
 def predict_sign():
@@ -722,11 +1159,11 @@ def search():
     if request.method == 'POST':
         data = request.get_json() or {}
         search_term = data.get('query', '').lower().strip()
-        logger.info(f"ðŸ” POST search query: '{search_term}'")
+        logger.info(f"Ã°Å¸â€Â POST search query: '{search_term}'")
     elif request.method == 'GET':
         search_term = request.args.get('q', '').lower().strip()
         search_term = search_term or request.args.get('query', '').lower().strip()
-        logger.info(f"ðŸ” GET search query: '{search_term}'")
+        logger.info(f"Ã°Å¸â€Â GET search query: '{search_term}'")
     
     # If no search term, return all words (limited to first 100)
     if not search_term:
@@ -747,7 +1184,7 @@ def search():
             "message": f"Showing first {len(sorted_words)} words"
         }
         
-        logger.info(f"âœ… No search term - returning {len(sorted_words)} words")
+        logger.info(f"Ã¢Å“â€¦ No search term - returning {len(sorted_words)} words")
         return jsonify(result)
     
     # Perform search
@@ -782,7 +1219,7 @@ def search():
         "message": f"Found {len(final_words)} matches for '{search_term}'"
     }
     
-    logger.info(f"ðŸŽ¯ Search '{search_term}' found {len(final_words)} matches")
+    logger.info(f"Ã°Å¸Å½Â¯ Search '{search_term}' found {len(final_words)} matches")
     return jsonify(result)
 
 
@@ -805,7 +1242,7 @@ def get_words():
             "top3_accuracy": "92.5%"
         })
     else:
-        logger.warning("ðŸ“ /api/words - model not loaded, returning defaults")
+        logger.warning("Ã°Å¸â€œÂ /api/words - model not loaded, returning defaults")
         default_words = ["hello", "thank you", "yes", "no", "please", "sorry", "help", "good", "about", "accept"]
         
         return jsonify({
@@ -820,9 +1257,11 @@ def get_words():
         })
 
 
-@app.route('/api/status', methods=['GET'])
+@app.route('/api/status', methods=['GET', 'OPTIONS'])
 def status():
     """Backend status check"""
+    if request.method == 'OPTIONS':
+        return '', 204
     word_count = len(LABELS_MAP) if LABELS_MAP else 0
     
     return jsonify({
@@ -847,7 +1286,7 @@ def reset_buffer():
     global FRAME_BUFFER, PREDICTION_BUFFER
     FRAME_BUFFER.clear()
     PREDICTION_BUFFER.clear()
-    logger.info("ðŸ”„ Buffers reset")
+    logger.info("Ã°Å¸â€â€ž Buffers reset")
     return jsonify({"success": True, "message": "Buffers reset successfully"})
 
 
@@ -910,65 +1349,65 @@ def serve_video(filename):
 
 
 # Authentication endpoints for frontend compatibility
-@app.route('/api/auth/login', methods=['POST'])
+@app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
 def login():
-    """Simple login - accepts any email/password for demo"""
+    """Login with MySQL database"""
+    if request.method == 'OPTIONS':
+        return '', 204
     try:
         data = request.get_json()
-        email = data.get('email', '')
+        email = data.get('email', '').strip().lower()
         password = data.get('password', '')
         
-        # Basic validation
+        # Validation
         if not email or not password:
             return jsonify({
                 "success": False,
                 "error": "Email and password required"
             }), 400
         
-        # For demo - accept any valid email format
         if '@' not in email:
             return jsonify({
                 "success": False,
                 "error": "Invalid email format"
             }), 400
         
-        # Success - return mock user
-        username = email.split('@')[0]
+        # Check if user exists
+        user = User.query.filter_by(email=email).first()
+        
+        if not user or not user.check_password(password):
+            return jsonify({
+                "success": False,
+                "error": "Invalid email or password"
+            }), 401
+        
+        # Success - return user data
+        logger.info(f"[CHECK] User logged in: {user.username}")
         return jsonify({
             "success": True,
-            "token": f"token-{username}",
-            "user": {
-                "user_id": hash(email) % 10000,
-                "username": username,
-                "email": email,
-                "stats": {
-                    "level": 1,
-                    "total_points": 0,
-                    "current_streak": 0,
-                    "longest_streak": 0,
-                    "total_attempts": 0,
-                    "correct_attempts": 0
-                }
-            }
+            "token": f"token-{user.id}-{user.username}",
+            "user": user.to_dict()
         }), 200
         
     except Exception as e:
-        logger.error(f"Login error: {e}")
+        logger.error(f"[ERROR] Login error: {e}")
         return jsonify({
             "success": False,
             "error": "Login failed"
         }), 500
 
-@app.route('/api/auth/register', methods=['POST'])
+@app.route('/api/auth/register', methods=['POST', 'OPTIONS'])
 def register():
-    """Simple register - same as login for demo"""
+    """Register new user with MySQL database"""
+    if request.method == 'OPTIONS':
+        return '', 204
     try:
         data = request.get_json()
-        email = data.get('email', '')
+        email = data.get('email', '').strip().lower()
         password = data.get('password', '')
-        username = data.get('username', '')
+        username = data.get('username', '').strip()
         
-        # Basic validation
+        # Validation
         if not email or not password:
             return jsonify({
                 "success": False,
@@ -976,33 +1415,51 @@ def register():
             }), 400
         
         if not username:
-            username = email.split('@')[0]
+            return jsonify({
+                "success": False,
+                "error": "Username required"
+            }), 400
         
-        # For demo - accept any valid email
         if '@' not in email:
             return jsonify({
                 "success": False,
                 "error": "Invalid email format"
             }), 400
         
-        # Success - return mock user
+        if len(password) < 6:
+            return jsonify({
+                "success": False,
+                "error": "Password must be at least 6 characters"
+            }), 400
+        
+        # Check if user exists
+        if User.query.filter_by(email=email).first():
+            return jsonify({
+                "success": False,
+                "error": "Email already registered"
+            }), 409
+        
+        if User.query.filter_by(username=username).first():
+            return jsonify({
+                "success": False,
+                "error": "Username already taken"
+            }), 409
+        
+        # Create new user
+        user = User(email=email, username=username)
+        user.set_password(password)
+        
+        db.session.add(user)
+        db.session.commit()
+        
+        logger.info(f"[CHECK] New user registered: {user.username}")
+        
         return jsonify({
             "success": True,
-            "token": f"token-{username}",
-            "user": {
-                "user_id": hash(email) % 10000,
-                "username": username,
-                "email": email,
-                "stats": {
-                    "level": 1,
-                    "total_points": 0,
-                    "current_streak": 0,
-                    "longest_streak": 0,
-                    "total_attempts": 0,
-                    "correct_attempts": 0
-                }
-            }
-        }), 200
+            "token": f"token-{user.id}-{user.username}",
+            "user": user.to_dict()
+        }), 201
+
         
     except Exception as e:
         logger.error(f"Register error: {e}")
@@ -1013,28 +1470,85 @@ def register():
 
 @app.route('/api/auth/me', methods=['GET'])
 def me():
-    return jsonify({
-        'success': True,
-        'user': {
-            'user_id': 1, 
-            'username': 'user', 
-            'email': 'test@test.com', 
-            'stats': {
-                'level': 1, 
-                'total_points': 0, 
-                'current_streak': 0, 
-                'longest_streak': 0, 
-                'total_attempts': 0, 
-                'total_correct_attempts': 0, 
-                'words_practiced': [], 
-                'accuracy': 0
-            }
-        }
-    })
+    """Get current user profile with database"""
+    try:
+        # Get token from header
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            # For now, return demo user if no token
+            return jsonify({
+                'success': True,
+                'user': {
+                    'user_id': 0,
+                    'username': 'demo',
+                    'email': 'demo@gesturease.com',
+                    'stats': {
+                        'level': 1,
+                        'total_points': 0,
+                        'current_streak': 0,
+                        'longest_streak': 0,
+                        'total_attempts': 0,
+                        'correct_attempts': 0,
+                        'words_practiced': [],
+                        'accuracy': 0
+                    }
+                }
+            })
+        
+        # Extract user ID from token
+        token = auth_header.replace('Bearer ', '')
+        try:
+            user_id = int(token.split('-')[1])
+        except:
+            return jsonify({'success': False, 'error': 'Invalid token'}), 401
+        
+        # Get user from database
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        
+        return jsonify({
+            'success': True,
+            'user': user.to_dict()
+        })
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Error fetching user profile: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/leaderboard', methods=['GET'])
 def leaderboard():
-    return jsonify({'success': True, 'leaderboard': []})
+    """Get top users leaderboard"""
+    try:
+        # Get top 10 users by points
+        top_users = db.session.query(User, db.func.sum(GestureAttempt.points).label('total_points'))\
+            .outerjoin(GestureAttempt)\
+            .group_by(User.id)\
+            .order_by(db.desc('total_points'))\
+            .limit(10).all()
+        
+        leaderboard_data = []
+        for idx, (user, points) in enumerate(top_users, 1):
+            stats = user.get_stats()
+            leaderboard_data.append({
+                'rank': idx,
+                'username': user.username,
+                'total_points': stats['total_points'],
+                'accuracy': stats['accuracy'],
+                'total_attempts': stats['total_attempts'],
+                'level': stats['level']
+            })
+        
+        return jsonify({
+            'success': True,
+            'leaderboard': leaderboard_data,
+            'total_users': User.query.count()
+        })
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Leaderboard error: {e}")
+        return jsonify({'success': True, 'leaderboard': []})
+
 def extract_hand_landmarks(self, image):
     """Extract with SHOULDER CENTER normalization"""
     rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -1301,9 +1815,9 @@ def debug_endpoint():
         "model_object_loaded": MODEL is not None,
         "buffer_size": len(FRAME_BUFFER),
         "sequence_length": SEQUENCE_LENGTH,
-        "feature_dim": FEATURE_DIM,
+        "feature_dim": FEATURE_DIM, 
         "confidence_threshold": CONFIDENCE_THRESHOLD,
-        "min_hand_confidence": MIN_HAND_CONFIDENCE,
+        "min_hand_confidence": MIN_HAND_CONFIDENCE, 
         
         # CRITICAL DEBUG INFO
         "hello_debug": {
@@ -1329,33 +1843,144 @@ def debug_endpoint():
     })
 
 
+# [FIRE] NEW: SAVE LANDMARKS ENDPOINT FOR DATA COLLECTION
+@app.route('/api/save_landmarks', methods=['POST', 'OPTIONS'])
+def save_landmarks():
+    """
+    Save recorded landmarks to dataset folder structure.
+    
+    Request:
+    {
+        "word": "hello",
+        "landmarks": [[x1,y1,z1,...], [x2,y2,z2,...], ...]
+    }
+    
+    Response:
+    {
+        "status": "saved",
+        "word": "hello",
+        "file": "hello_01.npy",
+        "frames": 30,
+        "shape": [30, 126]
+    }
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    try:
+        data = request.json
+        word = data.get('word', '').lower().strip()
+        landmarks = data.get('landmarks', [])
+        
+        # Validate input
+        if not word or word == 'undefined' or word == 'none':
+            logger.error(f"[ERROR] Invalid word: '{word}'")
+            return jsonify({
+                "status": "error",
+                "message": "Invalid word provided"
+            }), 400
+        
+        if len(landmarks) < 10:
+            logger.error(f"[ERROR] Too few frames: {len(landmarks)}")
+            return jsonify({
+                "status": "error",
+                "message": f"Too few frames ({len(landmarks)} < 10)"
+            }), 400
+        
+        if len(landmarks) > 200:
+            logger.error(f"[ERROR] Too many frames: {len(landmarks)}")
+            return jsonify({
+                "status": "error",
+                "message": f"Too many frames ({len(landmarks)} > 200)"
+            }), 400
+        
+        # Convert to numpy array
+        landmarks_array = np.array(landmarks, dtype=np.float32)
+        
+        # Validate shape
+        if landmarks_array.ndim != 2 or landmarks_array.shape[1] != 126:
+            logger.error(f"[ERROR] Invalid shape: {landmarks_array.shape}")
+            return jsonify({
+                "status": "error",
+                "message": f"Invalid landmark shape: {landmarks_array.shape}"
+            }), 400
+        
+        # Create dataset directory structure
+        dataset_dir = Path('dataset') / word
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"[FILE_FOLDER] Dataset dir: {dataset_dir}")
+        
+        # Find next file number
+        existing_files = list(dataset_dir.glob(f"{word}_*.npy"))
+        next_num = len(existing_files) + 1
+        
+        # Save file
+        filename = f"{word}_{next_num:02d}.npy"
+        filepath = dataset_dir / filename
+        
+        np.save(filepath, landmarks_array)
+        logger.info(f"[CHECK] Saved: {filepath}")
+        
+        # Verify save
+        if not filepath.exists():
+            logger.error(f"[ERROR] File not created: {filepath}")
+            return jsonify({
+                "status": "error",
+                "message": "Failed to save file"
+            }), 500
+        
+        # Verify loaded data
+        loaded = np.load(filepath)
+        logger.info(f"[CHECK] Verified: shape={loaded.shape}, dtype={loaded.dtype}")
+        
+        return jsonify({
+            "status": "saved",
+            "word": word,
+            "file": filename,
+            "frames": int(landmarks_array.shape[0]),
+            "shape": list(landmarks_array.shape),
+            "path": str(filepath),
+            "message": f"[CHECK] Successfully saved {landmarks_array.shape[0]} frames"
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"[ERROR] Error saving landmarks: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+# Load artifacts on import for better startup time
+load_mlops_artifacts()
+
 if __name__ == '__main__':
-    print(" Starting FIXED Sign Language Recognition Server...")
+    print("[LAUNCH] Starting Gesture-Ease Backend Server...")
     print("="*70)
     
-    # Load MLOps artifacts with detailed feedback
-    if load_mlops_artifacts():
-        word_count = len(LABELS_MAP) if LABELS_MAP else 0
-        sample_words = list(LABELS_MAP.values())[:10] if LABELS_MAP else []
-        
-        print(f"Server ready with {word_count} sign classes")
-        print(f" Sample words: {sample_words}")
-        print(f" Model loaded: {MODEL_LOADED}")
-        print(f" Scaler loaded: {SCALER is not None}")
-        print("="*70)
-        print(" Available endpoints:")
-        print("   Status: http://localhost:5000/api/status")
-        print("   Search: http://localhost:5000/api/search")
-        print("    Words: http://localhost:5000/api/words")
-        print("   Predict: http://localhost:5000/api/predict")
-        print("    Videos: http://localhost:5000/videos/<filename>")
-        print("   Debug: http://localhost:5000/api/debug")
-        print("     Health: http://localhost:5000/health")
-        print("="*70)
-        print("¯ Frontend should now work perfectly!")
-        print("ðŸš€ Starting Flask server on port 5000...")
-        
-        app.run(host='0.0.0.0', port=5000, debug=False)
+    word_count = len(LABELS_MAP) if LABELS_MAP else 0
+    sample_words = list(LABELS_MAP.values())[:10] if LABELS_MAP else []
+    
+    print(f"[OK] Server ready with {word_count} sign classes")
+    print(f"[WORDS] Sample words: {sample_words}")
+    print(f"[MODEL] Model loaded: {MODEL_LOADED}")
+    print(f"[SCALER] Scaler loaded: {SCALER is not None}")
+    print("="*70)
+    print("[ENDPOINTS] Available endpoints:")
+    print("   Status: http://localhost:5000/api/status")
+    print("   Search: http://localhost:5000/api/search")
+    print("   Words: http://localhost:5000/api/words")
+    print("   Predict: http://localhost:5000/api/predict")
+    print("   Health: http://localhost:5000/health")
+    print("="*70)
+    
+    # Use Gunicorn in production, Flask dev server locally
+    if os.getenv('FLASK_ENV') == 'production':
+        print("[PROD] Production mode - use Gunicorn to start")
+        print("   gunicorn -c gunicorn_config.py app:app")
     else:
-        print(" Server startup failed - missing artifacts")
-        print("Fix with: python train_model.py --model_type advanced --epochs 200")
+        print("[DEV] Development mode - starting Flask dev server")
+        app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

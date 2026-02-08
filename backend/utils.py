@@ -28,7 +28,7 @@ def get_git_sha():
 
 def save_metadata(path, metadata, filename="metadata.json"):
     """Saves metadata to a JSON file."""
-    path = Path(path)
+    path = Path(path)  
     path.mkdir(parents=True, exist_ok=True)
     with open(path / filename, 'w') as f:
         json.dump(metadata, f, indent=4)
