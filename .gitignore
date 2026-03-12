@@ -93,3 +93,10 @@ IMPLEMENTATION_COMPLETE.md
 SYSTEM_READY_SUMMARY.md
 VERIFICATION_LOGIC_CORRECTED.md
 _archive/
+
+
+
+ml_env/
+backend/ml_env/
+venv/
+.venv/

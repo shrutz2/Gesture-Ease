@@ -11,8 +11,8 @@
     <div id="root"></div>
     
     <script>
-      console.log('🎯 GestureB - EXACT Training Approach');
-      console.log('भाई exactly वैसे ही predict करेंगे जैसे train किया!');
+      console.log(' GestureB');
+     
       
       // Check backend connection
       setTimeout(async () => {
@@ -21,14 +21,14 @@
           const data = await response.json();
           
           if (data.model_loaded) {
-            console.log(`✅ Backend ready with ${data.total_words} words`);
-            console.log(`🎯 Approach: ${data.approach}`);
-            console.log(`📊 Features: ${data.feature_dim}D, Sequence: ${data.sequence_length}`);
+            console.log(`Backend ready with ${data.total_words} words`);
+            console.log(`Approach: ${data.approach}`);
+            console.log(`Features: ${data.feature_dim}D, Sequence: ${data.sequence_length}`);
           } else {
-            console.warn('⚠️ Backend model not loaded yet');
+            console.warn('Backend model not loaded yet');
           }
         } catch (error) {
-          console.error('❌ Backend connection failed:', error.message);
+          console.error('Backend connection failed:', error.message);
           console.log('Start backend with: cd backend && python app.py');
         }
       }, 1000);
