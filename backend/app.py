@@ -39,7 +39,7 @@ from database import db, User, UserProgress, GestureAttempt, LeaderboardEntry
 # Model Configuration
 SEQUENCE_LENGTH = 30  # Frames per gesture sequence
 FEATURE_DIM = 126     # 21 landmarks Ã— 2 hands Ã— 3 coordinates
-CONFIDENCE_THRESHOLD = 0.25
+CONFIDENCE_THRESHOLD = 0.25  # Lowered - single attempt verification doesn't need 40%
 MIN_HAND_CONFIDENCE = 0.5
 SMOOTHING_WINDOW = 5
 # Global model state
@@ -51,6 +51,7 @@ MODEL_LOADED = False
 # Frame and prediction buffers for temporal smoothing
 FRAME_BUFFER = deque(maxlen=SEQUENCE_LENGTH)
 PREDICTION_BUFFER = deque(maxlen=5)
+SOFTMAX_BUFFER = deque(maxlen=5)
 
 app = Flask(__name__)
 
@@ -74,40 +75,45 @@ with app.app_context():
         logger.warning(f"⚠️ Database connection warning: {e}")
 
 
+def reset_prediction_buffer():
+    """Reset softmax buffer when gesture session starts"""
+    global SOFTMAX_BUFFER
+    SOFTMAX_BUFFER.clear()
+    logger.info("[BUFFER] Prediction buffer reset for new session")
+
+
+def smooth_softmax_predictions(new_softmax):
+    """Temporal smoothing: maintain buffer of last 5 softmax outputs"""
+    global SOFTMAX_BUFFER
+    SOFTMAX_BUFFER.append(new_softmax)
+    if len(SOFTMAX_BUFFER) > 0:
+        averaged_softmax = np.mean(np.array(list(SOFTMAX_BUFFER)), axis=0)
+        return averaged_softmax
+    return new_softmax
+
+
 # [FIRE] VERIFICATION HELPER FUNCTION (TARGET-ONLY VERIFICATION)
 def verify_gesture(landmarks_sequence, target_word, model, scaler, labels_map, 
-                   confidence_threshold=0.15):
+                   confidence_threshold=CONFIDENCE_THRESHOLD, use_smoothing=True):
     """
-    [CHECK] PURE VERIFICATION LOGIC (NOT classification)
+    PROMPT 5: Target-only verification
     
-    Question: "Did user perform TARGET_WORD?"
-    NOT: "What gesture did user perform?"
-    
-    [BULLSEYE] Core principle: 
-    - Ignore what model thinks is "strongest"
-    - Only check if TARGET has enough confidence
-    - User's intention is the source of truth
-    
-    Args:
-        landmarks_sequence: np.array of shape (30, 126)
-        target_word: str - the word to verify
-        model: Trained BiLSTM model
-        scaler: StandardScaler for normalization
-        labels_map: dict mapping indices to gesture names
-        confidence_threshold: minimum confidence to accept target (default 0.15)
-    
-    Returns:
-        dict with verification results
+    - Find target word index
+    - Extract ONLY target confidence
+    - Compare with threshold (uses CONFIDENCE_THRESHOLD)
+    - Ignore highest predicted class
     """
     
-    # ---- Step 1: Normalize exactly like training ----
     landmarks_flat = landmarks_sequence.reshape(-1, 126)
     landmarks_normalized = scaler.transform(landmarks_flat).reshape(1, 30, 126)
     
-    # ---- Step 2: Get model predictions ----
-    predictions = model.predict(landmarks_normalized, verbose=0)[0]
+    raw_predictions = model.predict(landmarks_normalized, verbose=0)[0]
     
-    # ---- Step 3: Find target word index ----
+    if use_smoothing:
+        predictions = smooth_softmax_predictions(raw_predictions)
+    else:
+        predictions = raw_predictions
+    
     target_word_lower = target_word.lower().strip()
     target_idx = None
     
@@ -121,17 +127,13 @@ def verify_gesture(landmarks_sequence, target_word, model, scaler, labels_map,
             "is_correct": False,
             "target_word": target_word,
             "target_confidence": 0.0,
-            "message": f"[ERROR] Target '{target_word}' not in model labels"
+            "message": f"[ERROR] Target '{target_word}' not in model labels",
+            "buffer_size": len(SOFTMAX_BUFFER)
         }
     
-    # ---- Step 4: Extract target confidence ONLY ----
     target_confidence = float(predictions[target_idx])
-    
-    # ---- Step 5: VERIFICATION DECISION ----
-    # Pure comparison: Is target strong enough?
     is_correct = target_confidence >= confidence_threshold
     
-    # ---- Step 6: Calculate points ----
     if is_correct:
         if target_confidence >= 0.6:
             points = 15
@@ -144,7 +146,6 @@ def verify_gesture(landmarks_sequence, target_word, model, scaler, labels_map,
     else:
         points = 0
     
-    # ---- Step 7: Generate message ----
     if is_correct:
         if target_confidence >= 0.6:
             message = f"[CHECK] Perfect! You signed '{target_word}' very clearly!"
@@ -155,7 +156,6 @@ def verify_gesture(landmarks_sequence, target_word, model, scaler, labels_map,
     else:
         message = f"[ERROR] Try again. '{target_word}' not clear enough."
     
-    # ---- Step 8: Get top-5 for debugging/logging ----
     top_k_indices = np.argsort(predictions)[-5:][::-1]
     top_predictions = []
     for rank, idx in enumerate(top_k_indices, 1):
@@ -173,7 +173,9 @@ def verify_gesture(landmarks_sequence, target_word, model, scaler, labels_map,
         "target_confidence": target_confidence,
         "message": message,
         "points": points,
-        "top_predictions": top_predictions
+        "top_predictions": top_predictions,
+        "buffer_size": len(SOFTMAX_BUFFER),
+        "smoothing_applied": use_smoothing
     }
 
 
@@ -199,11 +201,10 @@ def handle_preflight():
         return response
 
 class EnhancedLandmarkExtractor:
-    """Enhanced landmark extractor matching the training preprocessing"""
+    """Extract RAW Mediapipe landmarks (PROMPT 1)"""
     
     def __init__(self):
         self.mp_hands = mp.solutions.hands
-        self.mp_pose = mp.solutions.pose
         self.mp_drawing = mp.solutions.drawing_utils
         
         self.hands = self.mp_hands.Hands(
@@ -214,66 +215,30 @@ class EnhancedLandmarkExtractor:
             model_complexity=1
         )
         
-        self.pose = self.mp_pose.Pose(
-            static_image_mode=False,
-            model_complexity=1,
-            enable_segmentation=False,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        
     def extract_hand_landmarks(self, image):
-        """Extract hand landmarks with enhanced normalization"""
+        """Extract landmarks in EXACT training format: (2, 21, 3) → (126,)
+        
+        Training format:
+        - No handedness logic
+        - Detection order only (up to 2 hands)
+        - Zero padding if < 2 hands
+        - Output: (126,) = 2 hands × 21 landmarks × 3 coords
+        """
         rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
         hands_results = self.hands.process(rgb_image)
-        pose_results = self.pose.process(rgb_image)
         
-        left_hand_landmarks = np.zeros(63)
-        right_hand_landmarks = np.zeros(63)
-        
-        h, w = image.shape[:2]
-        
-        shoulder_center = np.array([w/2, h/3])
-        if pose_results.pose_landmarks:
-            left_shoulder = pose_results.pose_landmarks.landmark[11]
-            right_shoulder = pose_results.pose_landmarks.landmark[12]
-            shoulder_center = np.array([
-                (left_shoulder.x + right_shoulder.x) / 2 * w,
-                (left_shoulder.y + right_shoulder.y) / 2 * h
-            ])
-        
+        landmarks = np.zeros((2, 21, 3), dtype=np.float32)
         hands_detected = 0
         
-        if hands_results.multi_hand_landmarks and hands_results.multi_handedness:
-            for hand_landmarks, handedness in zip(hands_results.multi_hand_landmarks, hands_results.multi_handedness):
-                hand_confidence = handedness.classification[0].score
-                if hand_confidence < MIN_HAND_CONFIDENCE:
-                    continue
-                    
-                hand_label = handedness.classification[0].label
+        if hands_results.multi_hand_landmarks:
+            for i, hand_landmarks in enumerate(hands_results.multi_hand_landmarks):
+                if i >= 2:
+                    break
                 hands_detected += 1
-                
-                landmarks = []
-                for landmark in hand_landmarks.landmark:
-                    x = landmark.x * w
-                    y = landmark.y * h
-                    z = landmark.z
-                    
-                    x_norm = (x - shoulder_center[0]) / w
-                    y_norm = (y - shoulder_center[1]) / h
-                    z_norm = z
-                    
-                    landmarks.extend([x_norm, y_norm, z_norm])
-                
-                if hand_label == 'Left':
-                    left_hand_landmarks = np.array(landmarks)
-                else:
-                    right_hand_landmarks = np.array(landmarks)
+                for j, lm in enumerate(hand_landmarks.landmark):
+                    landmarks[i, j] = [lm.x, lm.y, lm.z]
         
-        combined_landmarks = np.concatenate([left_hand_landmarks, right_hand_landmarks])
-        
-        return combined_landmarks, hands_detected, hands_results
+        return landmarks.reshape(-1), hands_detected, hands_results
     
     def draw_enhanced_landmarks(self, image, hands_results):
         """Draw enhanced landmarks on image"""
@@ -687,13 +652,8 @@ def predict_gesture():
     return predict_from_landmarks()
 
 
-def normalize_landmark_sequence(landmarks_array, target_length):
-    """
-    PROFESSOR FIX: Simple sequence normalization.
-    - No zeros padding (causes scaler crash)
-    - Repeat last valid frame instead
-    - Matches training distribution
-    """
+def normalize_landmark_sequence(landmarks_array, target_length=30):
+    """PROMPT 2: Normalize to exactly 30 frames"""
     if len(landmarks_array) == 0:
         raise ValueError("Empty landmark sequence")
     
@@ -703,30 +663,16 @@ def normalize_landmark_sequence(landmarks_array, target_length):
         return landmarks_array
     
     if current_length > target_length:
-        # Too long: uniform sampling
         indices = np.linspace(0, current_length - 1, target_length, dtype=int)
         return landmarks_array[indices]
     else:
-        # Too short: repeat last frame (NOT zeros!)
         last_frame = landmarks_array[-1]
         pad_count = target_length - current_length
-        
-        padding = np.repeat(
-            last_frame[np.newaxis, :],
-            pad_count,
-            axis=0
-        )
-        
+        padding = np.repeat(last_frame[np.newaxis, :], pad_count, axis=0)
         return np.vstack([landmarks_array, padding])
 
 
-def apply_spatial_normalization(landmarks_array):
-    """
-    PROFESSOR FIX: No normalization.
-    Training used RAW landmarks, so we keep them RAW.
-    Scaler handles distribution.
-    """
-    return landmarks_array
+
 
 
 
@@ -737,6 +683,7 @@ def predict_from_landmarks():
     
     Pure verification: Does user's gesture match TARGET_WORD?
     Ignores model's "strongest prediction" - respects user's intent
+    Query param: ?reset_buffer=true to start new gesture session
     """
     if request.method == 'OPTIONS':
         return '', 200
@@ -752,6 +699,10 @@ def predict_from_landmarks():
         data = request.json
         target_word = data.get('target_word', '').lower().strip()
         landmarks_sequence = data.get('landmarks', [])
+        
+        reset_buffer = request.args.get('reset_buffer', 'false').lower() == 'true'
+        if reset_buffer:
+            reset_prediction_buffer()
         
         # [CHECK] Validate target_word
         if not target_word or target_word == 'undefined' or target_word == 'none':
@@ -782,7 +733,7 @@ def predict_from_landmarks():
                 "target_confidence": 0
             }), 400
         
-        # [CHECK] Fix sequence length to exactly 30 frames
+        # [CHECK] Fix sequence length to exactly 30 frames (PROMPT 2)
         if len(landmarks_array) > 30:
             indices = np.linspace(0, len(landmarks_array)-1, 30, dtype=int)
             landmarks_array = landmarks_array[indices]
@@ -794,14 +745,15 @@ def predict_from_landmarks():
         
         logger.info(f"[CHECK] Sequence normalized: {landmarks_array.shape}")
         
-        # [CHECK] PURE TARGET-ONLY VERIFICATION
+        # [CHECK] PURE TARGET-ONLY VERIFICATION - NO SMOOTHING (buffer is reset each time anyway)
         result = verify_gesture(
             landmarks_array,
             target_word,
             MODEL,
             SCALER,
             LABELS_MAP,
-            confidence_threshold=0.15  # Lower threshold = more forgiving
+            confidence_threshold=CONFIDENCE_THRESHOLD,
+            use_smoothing=False
         )
         
         logger.info(f"[CHECK] Verification result:")
@@ -811,14 +763,25 @@ def predict_from_landmarks():
         logger.info(f"   message: {result['message']}")
         logger.info(f"   points: {result['points']}")
         
-        # Return CLEAN response format
+        # Return CLEAN response format with buffer info
         return jsonify({
             "is_correct": result["is_correct"],
             "target_word": result["target_word"],
             "target_confidence": round(result["target_confidence"], 3),
             "message": result["message"],
             "points": result["points"],
-            "top_predictions": result["top_predictions"]
+            "top_predictions": result["top_predictions"],
+            "debug": {
+                "target_rank": next((p["rank"] for p in result["top_predictions"] if p["gesture"] == target_word.lower()), -1),
+                "top1": result["top_predictions"][0] if result["top_predictions"] else None,
+                "frames_received": len(landmarks_sequence),
+                "threshold_used": CONFIDENCE_THRESHOLD
+            },
+            "buffer_info": {
+                "size": result["buffer_size"],
+                "max_size": 5,
+                "smoothing_applied": result["smoothing_applied"]
+            }
         }), 200
         
     except Exception as e:
@@ -1280,6 +1243,22 @@ def status():
     })
 
 
+@app.route('/api/session/start', methods=['POST', 'OPTIONS'])
+def start_gesture_session():
+    """Start new gesture session - resets prediction buffer"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    reset_prediction_buffer()
+    
+    return jsonify({
+        "success": True,
+        "message": "New gesture session started",
+        "buffer_reset": True,
+        "buffer_size": len(SOFTMAX_BUFFER)
+    }), 200
+
+
 @app.route('/api/reset_buffer', methods=['POST'])
 def reset_buffer():
     """Reset the frame buffer"""
@@ -1549,32 +1528,7 @@ def leaderboard():
         logger.error(f"[ERROR] Leaderboard error: {e}")
         return jsonify({'success': True, 'leaderboard': []})
 
-def extract_hand_landmarks(self, image):
-    """Extract with SHOULDER CENTER normalization"""
-    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    
-    hands_results = self.hands.process(rgb_image)
-    pose_results = self.pose.process(rgb_image)
-    
-    h, w = image.shape[:2]
-    
-    # DEFAULT shoulder center
-    shoulder_center = np.array([w/2, h/3])
-    
-    # BETTER: Use actual shoulder detection
-    if pose_results.pose_landmarks:
-        left_shoulder = pose_results.pose_landmarks.landmark[11]
-        right_shoulder = pose_results.pose_landmarks.landmark[12]
-        shoulder_center = np.array([
-            (left_shoulder.x + right_shoulder.x) / 2 * w,
-            (left_shoulder.y + right_shoulder.y) / 2 * h
-        ])
-    
-    # Normalize coordinates RELATIVE to shoulder_center
-    x_norm = (x - shoulder_center[0]) / w
-    y_norm = (y - shoulder_center[1]) / h
-    z_norm = z  # depth as-is
-    return [x_norm, y_norm, z_norm]
+
 @app.route('/api/debug_landmarks', methods=['POST'])
 def debug_landmarks():
     """Debug endpoint to check landmark extraction quality"""
@@ -1726,52 +1680,59 @@ def debug_landmarks():
 
 @app.route('/api/test_model', methods=['GET'])
 def test_model():
-    """Test model with dummy data to check vocabulary"""
+    """Test model with dummy data - detailed prediction statistics"""
     if not MODEL_LOADED or not MODEL or not SCALER:
         return jsonify({"error": "Model not ready"}), 503
     
     try:
-        # Create dummy input of correct shape
-        dummy_input = np.random.random((1, SEQUENCE_LENGTH, FEATURE_DIM)).astype(np.float32)
-        
-        # Get model prediction
+        dummy_input = np.random.random((1, 30, 126)).astype(np.float32)
         predictions = MODEL.predict(dummy_input, verbose=0)[0]
         
-        # Get top 10 predictions
+        softmax_stats = {
+            "max_softmax_value": float(np.max(predictions)),
+            "min_softmax_value": float(np.min(predictions)),
+            "mean_softmax_value": float(np.mean(predictions)),
+            "std_softmax_value": float(np.std(predictions)),
+            "sum_softmax_value": float(np.sum(predictions))
+        }
+        
         top_indices = np.argsort(predictions)[::-1][:10]
         top_predictions = []
         
-        for idx in top_indices:
+        for rank, idx in enumerate(top_indices, 1):
             word = LABELS_MAP.get(idx, f"Unknown_{idx}")
             confidence = float(predictions[idx])
-            top_predictions.append({"index": int(idx), "word": word, "confidence": confidence})
+            top_predictions.append({
+                "rank": rank,
+                "index": int(idx),
+                "word": word,
+                "confidence": confidence
+            })
         
-        # Check where hello would be
-        hello_info = None
+        hello_info = {"exists_in_vocabulary": False, "index": -1, "softmax_confidence": 0.0, "rank_among_all_classes": -1}
         for idx, word in LABELS_MAP.items():
             if word.lower() == 'hello':
                 hello_confidence = float(predictions[idx])
-                hello_rank = np.where(np.argsort(predictions)[::-1] == idx)[0][0] + 1
+                hello_rank = int(np.where(np.argsort(predictions)[::-1] == idx)[0][0]) + 1
                 hello_info = {
-                    "index": idx,
-                    "confidence": hello_confidence,
-                    "rank": int(hello_rank)
+                    "exists_in_vocabulary": True,
+                    "index": int(idx),
+                    "softmax_confidence": hello_confidence,
+                    "rank_among_all_classes": hello_rank
                 }
                 break
         
         return jsonify({
             "success": True,
-            "model_output_shape": predictions.shape,
-            "total_classes": len(predictions),
-            "vocabulary_size": len(LABELS_MAP),
-            "top_10_random_predictions": top_predictions,
+            "model_architecture": {
+                "input_shape": str(MODEL.input_shape),
+                "output_shape": str(MODEL.output_shape),
+                "total_classes": int(MODEL.output_shape[-1])
+            },
+            "softmax_statistics": softmax_stats,
+            "top_10_predictions": top_predictions,
             "hello_analysis": hello_info,
-            "prediction_distribution": {
-                "min": float(np.min(predictions)),
-                "max": float(np.max(predictions)),
-                "mean": float(np.mean(predictions)),
-                "std": float(np.std(predictions))
-            }
+            "dummy_input_shape": list(dummy_input.shape)
         })
         
     except Exception as e:

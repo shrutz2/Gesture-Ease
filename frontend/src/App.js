@@ -240,7 +240,7 @@ const SearchPage = ({ onSearch, onProfile }) => {
       const response = await fetch(`${API}/search?q=${encodeURIComponent(searchTerm)}`);
       const data = await response.json();
       if (data.success) {
-        setResults(data.results || []);
+        setResults(data.words || []);
       }
     } catch (error) {
       console.error('Search error:', error);
@@ -261,6 +261,9 @@ const SearchPage = ({ onSearch, onProfile }) => {
 
       <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem' }}>
         <h1 style={{ textAlign: 'center', marginBottom: '2rem' }}>Search Signs</h1>
+        <div style={{ textAlign: 'center', marginBottom: '1rem', fontSize: '14px', color: '#666' }}>
+          Backend ready with {allWords.length} words • Features: 126D
+        </div>
 
         <form onSubmit={handleSearch} style={{ marginBottom: '2rem' }}>
           <div style={{ display: 'flex', gap: '1rem', maxWidth: '600px', margin: '0 auto' }}>
@@ -457,37 +460,27 @@ const PracticePage = ({ word, onBack }) => {
     });
   };
 
-  /* [FIRE] PURE RAW LANDMARKS - NO NORMALIZATION WHATSOEVER */
+  /* [FIRE] PURE RAW LANDMARKS - DETECTION ORDER FORMAT (matches backend training) */
   const extractPureRawLandmarks = (results) => {
-    const leftHandLandmarks = new Array(63).fill(0);
-    const rightHandLandmarks = new Array(63).fill(0);
+    const frame = new Array(126).fill(0);
 
-    if (!results.multiHandLandmarks || !results.multiHandedness || results.multiHandLandmarks.length === 0) {
-      return [...leftHandLandmarks, ...rightHandLandmarks];
+    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+      return frame;
     }
 
-    results.multiHandLandmarks.forEach((handLandmarks, idx) => {
-      const handedness = results.multiHandedness[idx];
-      if (!handedness || !handedness.classification || handedness.classification.length === 0) {
-        return;
-      }
+    // CRITICAL: Use detection order (loop index), NOT handedness
+    results.multiHandLandmarks.forEach((hand, handIndex) => {
+      if (handIndex >= 2) return;  // Max 2 hands
       
-      const handLabel = handedness.classification[0].label;
-      const landmarks = [];
-      
-      // [FIRE] PURE RAW - Direct MediaPipe output (x, y, z)
-      handLandmarks.forEach(lm => {
-        landmarks.push(lm.x, lm.y, lm.z);
+      hand.forEach((lm, lmIndex) => {
+        const base = handIndex * 63 + lmIndex * 3;
+        frame[base] = lm.x;
+        frame[base + 1] = lm.y;
+        frame[base + 2] = lm.z;
       });
-
-      if (handLabel === 'Left') {
-        leftHandLandmarks.splice(0, landmarks.length, ...landmarks);
-      } else {
-        rightHandLandmarks.splice(0, landmarks.length, ...landmarks);
-      }
     });
 
-    return [...leftHandLandmarks, ...rightHandLandmarks];
+    return frame;
   };
 
   const cleanup = () => {

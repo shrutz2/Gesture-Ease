@@ -342,32 +342,80 @@ class FixedSignLanguageTrainer:
         logger.info("[CHECK] Model artifacts saved")
 
 
-def load_data(data_dir):
-    """Load preprocessed data"""
-    data_path = Path(data_dir)
-    required_files = ["X_train.npy", "y_train.npy", "X_val.npy", "y_val.npy", "X_test.npy", "y_test.npy"]
+def load_data(dataset_dir):
+    """Load data from dataset/<word>/*.npy files"""
+    from sklearn.preprocessing import LabelEncoder
+    from sklearn.model_selection import train_test_split
+    from sklearn.preprocessing import RobustScaler
     
-    for file in required_files:
-        if not (data_path / file).exists():
-            raise FileNotFoundError(f"Missing required file: {data_path / file}")
+    dataset_path = Path(dataset_dir)
+    if not dataset_path.exists():
+        raise FileNotFoundError(f"Dataset directory not found: {dataset_path}")
     
-    logger.info("[FLOPPY_DISK] Loading preprocessed data...")
+    logger.info(f"[FLOPPY_DISK] Loading data from {dataset_path}...")
     
-    X_train = np.load(data_path / "X_train.npy")
-    y_train = np.load(data_path / "y_train.npy")
-    X_val = np.load(data_path / "X_val.npy")
-    y_val = np.load(data_path / "y_val.npy")
-    X_test = np.load(data_path / "X_test.npy")
-    y_test = np.load(data_path / "y_test.npy")
+    X, y = [], []
+    word_dirs = sorted([d for d in dataset_path.iterdir() if d.is_dir()])
     
-    logger.info(f"[CHECK] Data loaded - Train: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}")
+    for word_dir in word_dirs:
+        word = word_dir.name
+        npy_files = sorted(word_dir.glob('*.npy'))
+        for npy_file in npy_files:
+            sequence = np.load(npy_file)
+            if sequence.shape == (30, 126):
+                X.append(sequence)
+                y.append(word)
     
-    return (X_train, y_train), (X_val, y_val), (X_test, y_test)
+    X = np.array(X, dtype=np.float32)
+    logger.info(f"[CHECK] Loaded {len(X)} sequences from {len(word_dirs)} words")
+    
+    label_encoder = LabelEncoder()
+    y_encoded = label_encoder.fit_transform(y)
+    num_classes = len(label_encoder.classes_)
+    logger.info(f"[BULLSEYE] {num_classes} classes: {label_encoder.classes_.tolist()}")
+    
+    X_temp, X_test, y_temp, y_test = train_test_split(
+        X, y_encoded, test_size=0.15, stratify=y_encoded, random_state=SEED
+    )
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_temp, y_temp, test_size=0.176, stratify=y_temp, random_state=SEED
+    )
+    
+    scaler = RobustScaler()
+    X_train_flat = X_train.reshape(-1, 126)
+    scaler.fit(X_train_flat)
+    
+    X_train = scaler.transform(X_train_flat).reshape(X_train.shape)
+    X_val = scaler.transform(X_val.reshape(-1, 126)).reshape(X_val.shape)
+    X_test = scaler.transform(X_test.reshape(-1, 126)).reshape(X_test.shape)
+    
+    artifacts_dir = Path('artifacts')
+    artifacts_dir.mkdir(exist_ok=True)
+    
+    with open(artifacts_dir / 'scaler.pkl', 'wb') as f:
+        pickle.dump(scaler, f)
+    
+    with open(artifacts_dir / 'label_encoder.pkl', 'wb') as f:
+        pickle.dump(label_encoder, f)
+    
+    labels_data = {
+        'class_names': label_encoder.classes_.tolist(),
+        'num_classes': num_classes,
+        'id_to_label': {i: label for i, label in enumerate(label_encoder.classes_)},
+        'label_to_id': {label: i for i, label in enumerate(label_encoder.classes_)}
+    }
+    with open(artifacts_dir / 'labels.json', 'w') as f:
+        json.dump(labels_data, f, indent=2)
+    
+    logger.info(f"[CHECK] Train: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}")
+    logger.info(f"[FLOPPY_DISK] Artifacts saved to {artifacts_dir}")
+    
+    return (X_train, y_train), (X_val, y_val), (X_test, y_test), label_encoder
 
 
 def main():
     parser = argparse.ArgumentParser(description="Fixed Sign Language Model Training")
-    parser.add_argument('--data_dir', type=str, default='data/processed')
+    parser.add_argument('--data_dir', type=str, default='dataset')
     parser.add_argument('--artifacts_dir', type=str, default='artifacts')
     parser.add_argument('--models_dir', type=str, default='models')
     parser.add_argument('--experiments_dir', type=str, default='experiments')
@@ -397,12 +445,7 @@ def main():
     
     try:
         # Load data
-        (X_train, y_train), (X_val, y_val), (X_test, y_test) = load_data(config['data_dir'])
-        
-        # Load label encoder
-        with open(Path(config['artifacts_dir']) / 'label_encoder.pkl', 'rb') as f:
-            label_encoder = pickle.load(f)
-        
+        (X_train, y_train), (X_val, y_val), (X_test, y_test), label_encoder = load_data(config['data_dir'])
         num_classes = len(label_encoder.classes_)
         logger.info(f"[BULLSEYE] Training for {num_classes} classes")
         

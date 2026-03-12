@@ -122,5 +122,16 @@ Thumbs.db
 
 # Log files
 *.log
-=======
->>>>>>> 38cdfc4dfecf1a1a0dbc79e8c8d7de37e24e1f14
+
+
+
+ml_env/
+backend/ml_env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+node_modules/
+.env
+*.h5
+dataset/

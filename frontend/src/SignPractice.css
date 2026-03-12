@@ -1,4 +1,14 @@
-/* SignPractice.css - Clean Professional Design */
+/* SignPractice.css - Glassmorphism Design */
+
+/* 🔮 REUSABLE GLASS CONTAINER STYLE */
+.glass-container {
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
 
 .practice-page {
   min-height: 100vh;
@@ -11,10 +21,13 @@
   align-items: center;
   gap: 20px;
   margin-bottom: 30px;
-  background: rgba(255, 255, 255, 0.1);
   padding: 20px;
-  border-radius: 12px;
-  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
 }
 
 .back-button {
@@ -96,10 +109,13 @@
 
 /* Video Panel (LEFT) */
 .video-panel {
-  background: rgba(255, 255, 255, 0.1);
   padding: 25px;
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 16px;
-  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
 }
 
 .video-panel h2 {
@@ -118,10 +134,13 @@
 
 /* Camera Panel (RIGHT) */
 .camera-panel {
-  background: rgba(255, 255, 255, 0.1);
   padding: 25px;
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 16px;
-  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
 }
 
 .camera-panel h2 {
@@ -353,12 +372,15 @@
 
 /* Tips Section */
 .tips-section {
-  background: rgba(255, 255, 255, 0.1);
   padding: 25px;
-  border-radius: 16px;
-  backdrop-filter: blur(10px);
   max-width: 800px;
   margin: 0 auto;
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
 }
 
 .tips-section h3 {
