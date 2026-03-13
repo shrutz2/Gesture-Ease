@@ -1,6 +1,3 @@
-// ULTIMATE FIX: RAW landmarks only, backend handles ALL normalization
-// This matches EXACT training pipeline
-
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import './App.css';
 
@@ -14,7 +11,17 @@ const useAuth = () => useContext(AuthContext);
 const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const savedToken = localStorage.getItem('token');
+    const savedUser = localStorage.getItem('user');
+    if (savedToken && savedUser) {
+      setToken(savedToken);
+      setUser(JSON.parse(savedUser));
+    }
+    setLoading(false);
+  }, []);
 
   const login = async (email, password) => {
     try {
@@ -27,6 +34,8 @@ const AuthProvider = ({ children }) => {
       if (response.ok) {
         setToken(data.token);
         setUser(data.user);
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
         return { success: true };
       }
       return { success: false, error: data.error };
@@ -46,6 +55,8 @@ const AuthProvider = ({ children }) => {
       if (response.ok) {
         setToken(data.token);
         setUser(data.user);
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
         return { success: true };
       }
       return { success: false, error: data.error };
@@ -57,12 +68,12 @@ const AuthProvider = ({ children }) => {
   const logout = () => {
     setToken(null);
     setUser(null);
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
   };
 
-  const refreshUserStats = async () => { };
-
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout, refreshUserStats, isAuthenticated: !!user }}>
+    <AuthContext.Provider value={{ user, setUser, token, loading, login, register, logout, isAuthenticated: !!user }}>
       {children}
     </AuthContext.Provider>
   );
@@ -211,6 +222,7 @@ const SearchPage = ({ onSearch, onProfile }) => {
   const { user, logout } = useAuth();
 
   useEffect(() => {
+    window.history.pushState({ page: 'search' }, 'Search');
     fetchAllWords();
   }, []);
 
@@ -261,9 +273,6 @@ const SearchPage = ({ onSearch, onProfile }) => {
 
       <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem' }}>
         <h1 style={{ textAlign: 'center', marginBottom: '2rem' }}>Search Signs</h1>
-        <div style={{ textAlign: 'center', marginBottom: '1rem', fontSize: '14px', color: '#666' }}>
-          Backend ready with {allWords.length} words • Features: 126D
-        </div>
 
         <form onSubmit={handleSearch} style={{ marginBottom: '2rem' }}>
           <div style={{ display: 'flex', gap: '1rem', maxWidth: '600px', margin: '0 auto' }}>
@@ -303,7 +312,7 @@ const SearchPage = ({ onSearch, onProfile }) => {
 // Send PURE RAW landmarks, backend does ALL normalization
 // ========================================
 const PracticePage = ({ word, onBack }) => {
-  const { user, token, refreshUserStats } = useAuth();
+  const { user, token, setUser } = useAuth();
 
   const videoRef = useRef(null);
   const landmarksCanvasRef = useRef(null);
@@ -321,8 +330,25 @@ const PracticePage = ({ word, onBack }) => {
   const [isRecordingUI, setIsRecordingUI] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [feedback, setFeedback] = useState(null);
+  const isAnalyzingRef = useRef(false);
 
   const COUNTDOWN_TIME = 3;
+
+  useEffect(() => {
+    window.history.pushState({ page: 'practice', word }, `Practice ${word}`);
+    
+    const handlePopState = (e) => {
+      console.log('Pop state:', e.state);
+      cleanup();
+      onBack();
+    };
+    
+    window.addEventListener('popstate', handlePopState);
+    
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [word, onBack]);
 
   useEffect(() => {
     startCamera();
@@ -346,13 +372,13 @@ const PracticePage = ({ word, onBack }) => {
         videoRef.current.onloadedmetadata = () => setCameraReady(true);
       }
     } catch (e) {
-      console.error('[ERROR] Camera error:', e);
+      console.error(' Camera error:', e);
       alert('Cannot access camera');
     }
   };
 
   const initMediaPipe = async () => {
-    console.log('[BULLSEYE] Loading MediaPipe Hands ONLY');
+    console.log(' Loading MediaPipe Hands ONLY');
     
     const handsScript = document.createElement('script');
     handsScript.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.min.js';
@@ -370,7 +396,7 @@ const PracticePage = ({ word, onBack }) => {
       new Promise(resolve => cameraScript.onload = resolve)
     ]);
     
-    console.log('[CHECK] MediaPipe Hands loaded');
+    console.log('MediaPipe Hands loaded');
 
     const hands = new window.Hands({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`
@@ -395,7 +421,7 @@ const PracticePage = ({ word, onBack }) => {
     });
     camera.start();
     
-    console.log('[CHECK] Camera started');
+    console.log(' Camera started');
   };
 
   const onHandsResults = (results) => {
@@ -423,7 +449,7 @@ const PracticePage = ({ word, onBack }) => {
     // CRITICAL: Check REF
     if (isRecordingRef.current) {
       landmarksBufferRef.current.push(rawLandmarks);
-      console.log('[RED] [FRAME]', landmarksBufferRef.current.length);
+      console.log('[FRAME]', landmarksBufferRef.current.length);
     }
 
     // Draw
@@ -484,11 +510,17 @@ const PracticePage = ({ word, onBack }) => {
   };
 
   const cleanup = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-    }
-    if (mediaPipeRef.current) {
-      mediaPipeRef.current.close();
+    try {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
+      if (mediaPipeRef.current) {
+        mediaPipeRef.current.close();
+        mediaPipeRef.current = null;
+      }
+    } catch (e) {
+      console.error('Cleanup error:', e);
     }
   };
 
@@ -514,7 +546,7 @@ const PracticePage = ({ word, onBack }) => {
   };
 
   const startActualRecording = () => {
-    console.log('[RED] [START] Recording...');
+    console.log('Recording...');
     
     landmarksBufferRef.current = [];
     isRecordingRef.current = true;
@@ -526,10 +558,10 @@ const PracticePage = ({ word, onBack }) => {
       setIsRecordingUI(false);
 
       const landmarks = landmarksBufferRef.current;
-      console.log('[CHECK] Landmarks captured:', landmarks.length);
+      console.log('Landmarks captured:', landmarks.length);
 
       if (landmarks.length > 0) {
-        console.log('[CHECK] Landmarks captured:', landmarks.length, 'frames x', landmarks[0].length, 'features');
+        console.log('Landmarks captured:', landmarks.length, 'frames x', landmarks[0].length, 'features');
       }
 
       analyzeGesture(landmarks);
@@ -537,14 +569,22 @@ const PracticePage = ({ word, onBack }) => {
   };
 
   const analyzeGesture = async (landmarks) => {
+    // Prevent duplicate calls
+    if (isAnalyzingRef.current) {
+      console.log('Analysis already in progress, ignoring duplicate call');
+      return;
+    }
+    isAnalyzingRef.current = true;
+    
     // [FIRE] CRITICAL FIX 1: Validate word prop BEFORE sending
     if (!word || word === 'undefined') {
-      console.error('[ERROR] ERROR: word prop is undefined!');
+      console.error(' ERROR: word prop is undefined!');
       setFeedback({
         is_correct: false,
         message: 'Error: No target word specified',
         confidence: 0
       });
+      isAnalyzingRef.current = false;
       setIsAnalyzing(false);
       return;
     }
@@ -555,6 +595,7 @@ const PracticePage = ({ word, onBack }) => {
         message: 'Not enough frames. Keep hands visible.',
         confidence: 0
       });
+      isAnalyzingRef.current = false;
       return;
     }
 
@@ -583,7 +624,7 @@ const PracticePage = ({ word, onBack }) => {
 
       const result = await response.json();
       // Log full response with new verification logic
-      console.log('[CHECK] Backend response received:');
+      console.log(' Backend response received:');
       console.log('   Target word:', result.target_word);
       console.log('   Is correct:', result.is_correct);
       console.log('   Target confidence:', (result.target_confidence * 100).toFixed(1) + '%');
@@ -599,17 +640,56 @@ const PracticePage = ({ word, onBack }) => {
       
       setFeedback(result);
 
-      if (result.is_correct && refreshUserStats) {
-        refreshUserStats();
+      // Save attempt to database
+      if (user?.user_id) {
+        try {
+          const attemptResponse = await fetch(`${API}/attempt`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              user_id: user.user_id,
+              target_word: word,
+              is_correct: result.is_correct,
+              target_confidence: result.target_confidence,
+              points: result.points,
+              message: result.message,
+              top_predictions: result.top_predictions
+            })
+          });
+          const attemptData = await attemptResponse.json();
+          console.log('Attempt saved to database');
+          console.log('Points awarded:', result.points);
+          console.log('User stats from DB:', attemptData.user_stats);
+          
+          // Update user stats from database response - ONLY source of truth
+          if (attemptData.user_stats) {
+            console.log('Points awarded this attempt:', result.points);
+            console.log('Previous total_points:', user?.stats?.total_points);
+            console.log('New total_points from DB:', attemptData.user_stats.total_points);
+            console.log('Expected total:', (user?.stats?.total_points || 0) + result.points);
+            // Update localStorage directly
+            const updatedUser = { ...user, stats: attemptData.user_stats };
+            localStorage.setItem('user', JSON.stringify(updatedUser));
+            // Force update via setUser
+            setUser(updatedUser);
+            console.log('User updated in state and localStorage');
+          }
+        } catch (error) {
+          console.error('Error saving attempt:', error);
+        }
       }
     } catch (error) {
-      console.error('[ERROR] Prediction error:', error);
+      console.error(' Prediction error:', error);
       setFeedback({
         is_correct: false,
         message: 'Network error.',
         confidence: 0
       });
     } finally {
+      isAnalyzingRef.current = false;
       setIsAnalyzing(false);
     }
   };
@@ -623,7 +703,7 @@ const PracticePage = ({ word, onBack }) => {
       <div className="practice-header">
         <div className="practice-title">
           <h1>Practice: {word}</h1>
-          <div className="points-display">
+          <div className="points-display" key={`points-${user?.stats?.total_points}`}>
             Level {user?.stats?.level || 1} • {user?.stats?.total_points || 0} points
           </div>
         </div>
@@ -778,7 +858,7 @@ const PracticePage = ({ word, onBack }) => {
                   fontSize: '28px',
                   color: feedback.is_correct ? '#4caf50' : '#f44336'
                 }}>
-                  {feedback.is_correct ? '[CHECK] Correct' : '[ERROR] Try Again'}
+                  {feedback.is_correct ? 'Correct' : 'Try Again'}
                 </h3>
 
                 <p style={{ margin: '10px 0', color: '#333', fontSize: '16px' }}>

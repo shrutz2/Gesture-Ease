@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import layers, models, optimizers, callbacks
@@ -101,7 +99,7 @@ class FixedSignLanguageTrainer:
     
     def build_advanced_model(self, num_classes):
         """Build advanced model with proper attention using Functional API"""
-        logger.info(f"[BUILDING_CONSTRUCTION] Building advanced model for {num_classes} classes...")
+        logger.info(f" Building advanced model for {num_classes} classes...")
         
         # Input
         inputs = layers.Input(shape=(SEQUENCE_LENGTH, FEATURE_DIM))
@@ -316,11 +314,11 @@ class FixedSignLanguageTrainer:
         plt.savefig(self.models_dir / 'confusion_matrix.png', dpi=300, bbox_inches='tight')
         plt.close()
         
-        logger.info("[CHECK] Confusion matrix plot saved")
+        logger.info("Confusion matrix plot saved")
     
     def save_model_artifacts(self, label_encoder):
         """Save all model artifacts"""
-        logger.info("[FLOPPY_DISK] Saving model artifacts...")
+        logger.info(" Saving model artifacts...")
         
         # Save the complete model
         self.model.save(str(self.models_dir / 'model.keras'))
@@ -407,8 +405,8 @@ def load_data(dataset_dir):
     with open(artifacts_dir / 'labels.json', 'w') as f:
         json.dump(labels_data, f, indent=2)
     
-    logger.info(f"[CHECK] Train: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}")
-    logger.info(f"[FLOPPY_DISK] Artifacts saved to {artifacts_dir}")
+    logger.info(f"Train: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}")
+    logger.info(f"Artifacts saved to {artifacts_dir}")
     
     return (X_train, y_train), (X_val, y_val), (X_test, y_test), label_encoder
 
@@ -447,7 +445,7 @@ def main():
         # Load data
         (X_train, y_train), (X_val, y_val), (X_test, y_test), label_encoder = load_data(config['data_dir'])
         num_classes = len(label_encoder.classes_)
-        logger.info(f"[BULLSEYE] Training for {num_classes} classes")
+        logger.info(f"Training for {num_classes} classes")
         
         # Convert to one-hot encoding
         y_train_ohe = to_categorical(y_train, num_classes)
@@ -485,27 +483,21 @@ def main():
         
         # Final summary
         print("\n" + "="*80)
-        print("[PARTY_POPPER] TRAINING COMPLETED SUCCESSFULLY! [PARTY_POPPER]")
+        print(" TRAINING COMPLETED SUCCESSFULLY! ")
         print("="*80)
         print(f"[BULLSEYE] Final Test Accuracy: {results['test_accuracy']*100:.2f}%")
-        print(f"🥉 Top-3 Accuracy: {results['top3_accuracy']*100:.2f}%")
+        print(f" Top-3 Accuracy: {results['top3_accuracy']*100:.2f}%")
         if results['top5_accuracy'] > 0:
-            print(f"🥇 Top-5 Accuracy: {results['top5_accuracy']*100:.2f}%")
-        print(f"[BAR_CHART] Total Classes: {num_classes}")
-        print(f"[FLOPPY_DISK] Model saved to: {trainer.models_dir.absolute()}")
-        print(f"[CHART_INCREASING] Training logs: {run_dir.absolute()}")
+            print(f" Top-5 Accuracy: {results['top5_accuracy']*100:.2f}%")
+        print(f" Total Classes: {num_classes}")
+        print(f" Model saved to: {trainer.models_dir.absolute()}")
+        print(f" Training logs: {run_dir.absolute()}")
         
         if results['test_accuracy'] >= 0.90:
             print("[PARTY_POPPER] SUCCESS: Target accuracy of 90%+ achieved!")
         else:
-            print(f"⚠️  Current accuracy: {results['test_accuracy']*100:.1f}%")
-            print("[LIGHT_BULB] Tips to improve:")
-            print("   - Try --model_type advanced")
-            print("   - Increase --epochs")
-            print("   - More data augmentation")
-        
-        print("\n[ROCKET] Next step: Test with the Flask app:")
-        print("   python app.py")
+            print(f" Current accuracy: {results['test_accuracy']*100:.1f}%")
+      
         print("="*80)
         
     except Exception as e:
