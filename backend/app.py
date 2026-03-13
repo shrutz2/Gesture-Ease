@@ -851,7 +851,11 @@ def save_attempt():
         
         db.session.commit()
         
+        # Refresh user to get updated attempts
+        db.session.refresh(user)
+        
         logger.info(f"[CHECK] Attempt saved for user {user.username}: {target_word} - {'Correct' if is_correct else 'Incorrect'}")
+        logger.info(f"[CHECK] Total points after save: {sum([a.points for a in user.attempts])}")
         
         return jsonify({
             'success': True,

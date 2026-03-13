@@ -1,8 +1,19 @@
+FROM node:18 AS frontend-build
+
+WORKDIR /app
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/public ./public
+COPY frontend/src ./src
+RUN npm run build
+
+# Backend with static frontend
 FROM python:3.10-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
@@ -12,10 +23,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./
-RUN pip install --upgrade pip setuptools wheel && \
+RUN pip install --upgrade pip && \
     pip install --no-cache-dir --prefer-binary --retries 10 --timeout 120 -r requirements.txt
 
 COPY backend/ /app/
+
+# Copy frontend build to backend static folder
+RUN mkdir -p /app/static
+COPY --from=frontend-build /app/build /app/static
 
 EXPOSE 5000
 

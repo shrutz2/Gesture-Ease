@@ -1,8 +1,3 @@
-// SignPractice.js - ULTRA SIMPLE (Training-Style Auto Recording)
-// [CHECK] NO countdown gates
-// [CHECK] NO handsDetected conditions
-// [CHECK] AUTO start when button clicked
-// [CHECK] 30 frames = DONE (exactly like training)
 import React, { useState, useEffect, useRef } from 'react';
 import './SignPractice.css';
 import { saveNpy } from './saveNpy';
@@ -84,7 +79,7 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
       new Promise(resolve => cameraScript.onload = resolve)
     ]);
 
-    console.log('[CHECK] MediaPipe Hands loaded');
+    console.log('MediaPipe Hands loaded');
 
     const hands = new window.Hands({
       locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`
@@ -109,7 +104,7 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
     });
     camera.start();
     
-    console.log('[CHECK] Camera started');
+    console.log('Camera started');
   };
 
   /* ----------  onHandsResults - NO GATES  ---------- */
@@ -143,11 +138,11 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
       frameCountRef.current = landmarksBufferRef.current.length;
       setFrameCount(frameCountRef.current);
       
-      console.log('[RED] [FRAME]', frameCountRef.current, '/ 30');
+      console.log('Frame', frameCountRef.current, '/ 30');
 
       // Stop at 30
       if (frameCountRef.current >= SEQUENCE_LENGTH) {
-        console.log('[CHECK] 30 frames reached - stopping');
+        console.log('30 frames reached - stopping');
         stopRecording();
       }
     }
@@ -197,7 +192,7 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
 
   /* ----------  RECORDING - ULTRA SIMPLE  ---------- */
   const startRecording = () => {
-    console.log('[RED] [START] Recording started immediately');
+    console.log(' Recording started immediately');
     
     // Clear buffer
     landmarksBufferRef.current = [];
@@ -211,7 +206,7 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
   };
 
   const stopRecording = () => {
-    console.log('[STOP_SIGN] [STOP] Recording stopped');
+    console.log(' Recording stopped');
     
     // Clear flag
     isRecordingRef.current = false;
@@ -219,11 +214,11 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
 
     const landmarks = landmarksBufferRef.current;
     
-    console.log('[CHECK] Landmarks captured:', landmarks.length);
+    console.log(' Landmarks captured:', landmarks.length);
     
     if (landmarks.length > 0) {
-      console.log('[CHECK] Frame shape:', landmarks[0].length);
-      console.log('[CHECK] Non-zero:', landmarks[0].filter(v => v !== 0).length);
+      console.log('Frame shape:', landmarks[0].length);
+      console.log('Non-zero:', landmarks[0].filter(v => v !== 0).length);
     }
 
     // Validate
@@ -235,7 +230,7 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
       return;
     }
 
-    // [FIRE] NEW: Check mode
+    // Check mode
     if (dataCollectionMode) {
       saveLandmarks(landmarks);
     } else {
@@ -248,7 +243,7 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
     setIsAnalysing(true);
 
     try {
-      console.log('[OUTBOX_TRAY] Sending:', landmarks.length, 'frames');
+      console.log(' Sending:', landmarks.length, 'frames');
 
       const res = await fetch(`${process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000'}/api/predict_landmarks`, {
         method: 'POST',
@@ -265,7 +260,7 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const data = await res.json();
-      console.log('[INBOX_TRAY] Full backend response:');
+      console.log(' Full backend response:');
       console.log('   Target:', data.target_word);
       console.log('   Is correct:', data.is_correct);
       console.log('   Target confidence:', (data.target_confidence * 100).toFixed(1) + '%');
@@ -296,9 +291,9 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
               top_predictions: data.top_predictions
             })
           });
-          console.log('[CHECK] Attempt saved to database');
+          console.log(' Attempt saved to database');
         } catch (e) {
-          console.error('⚠️ Failed to save attempt:', e);
+          console.error(' Failed to save attempt:', e);
         }
       }
       
@@ -321,7 +316,7 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
     setIsAnalysing(true);
 
     try {
-      console.log('[FLOPPY_DISK] Saving landmarks to dataset:', word, landmarks.length, 'frames');
+      console.log('Saving landmarks to dataset:', word, landmarks.length, 'frames');
 
       const res = await fetch(`${process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000'}/api/save_landmarks`, {
         method: 'POST',
@@ -338,17 +333,17 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const data = await res.json();
-      console.log('[CHECK] Saved:', data);
+      console.log('Saved:', data);
       
       setFeedback({
         is_correct: true,
-        message: `[CHECK] Saved! (${landmarks.length} frames)`,
+        message: ` Saved! (${landmarks.length} frames)`,
         file: data.file
       });
       
       setRecordingsSaved(c => c + 1);
     } catch (e) {
-      console.error('[ERROR] Save error:', e);
+      console.error(' Save error:', e);
       setFeedback({ 
         is_correct: false, 
         message: 'Failed to save. Check backend.' 
