@@ -1,18 +1,18 @@
 name: Build and Deploy to AWS
 
 on:
+  push:
+    branches: [ main, master ]
   workflow_dispatch:
-  # Disabled - ECR repositories not set up
-  # push:
-  #   branches: [ main, master ]
-  # pull_request:
-  #   branches: [ main, master ]
 
 env:
   AWS_REGION: ap-south-1
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
   ECR_BACKEND_REPOSITORY: gesture-ease-backend
   ECR_FRONTEND_REPOSITORY: gesture-ease-frontend
   ECS_CLUSTER: gesture-ease-cluster
+  ECS_SERVICE: gesture-ease-service
+  ECS_TASK_FAMILY: gesture-ease-task
 
 jobs:
   build-backend:
