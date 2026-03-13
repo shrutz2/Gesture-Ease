@@ -64,16 +64,22 @@ htmlcov/
 # Docker
 .dockerignore
 
-# Model files (large)
+# Model files (large) - DON'T UPLOAD TO GIT
 *.h5
 *.keras
 *.pkl
 *.npy
+backend/models/
+backend/artifacts/
 
 # Data files
 data/videos/
 data/landmarks/
+backend/data/videos/
+backend/data/landmarks/
 experiments/
+backend/experiments/
+dataset/
 
 # Playwright
 test-results/
