@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import './App.css';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || window.location.origin;
 const API = `${BACKEND_URL}/api`;
 
 // Auth Context (unchanged)
