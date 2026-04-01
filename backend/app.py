@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 # Import database
 from database import db, User, UserProgress, GestureAttempt, LeaderboardEntry
+from auth import generate_token, verify_token, token_required
 
 # Model Configuration
 SEQUENCE_LENGTH = 30  # Frames per gesture sequence
@@ -56,7 +57,7 @@ SOFTMAX_BUFFER = deque(maxlen=5)
 app = Flask(__name__)
 
 # Database Configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'mysql+pymysql://root:password@localhost:3306/gesture_ease')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'mysql+pymysql://root:Peehu@1423@localhost:3306/gesture_ease')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_size': 10,
@@ -1364,11 +1365,12 @@ def login():
                 "error": "Invalid email or password"
             }), 401
         
-        # Success - return user data
+        # Success - return user data with JWT token
+        token = generate_token(user.id, user.username)
         logger.info(f"[CHECK] User logged in: {user.username}")
         return jsonify({
             "success": True,
-            "token": f"token-{user.id}-{user.username}",
+            "token": token,
             "user": user.to_dict()
         }), 200
         
@@ -1435,11 +1437,13 @@ def register():
         db.session.add(user)
         db.session.commit()
         
+        # Generate JWT token
+        token = generate_token(user.id, user.username)
         logger.info(f"[CHECK] New user registered: {user.username}")
         
         return jsonify({
             "success": True,
-            "token": f"token-{user.id}-{user.username}",
+            "token": token,
             "user": user.to_dict()
         }), 201
 
