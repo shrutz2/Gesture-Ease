@@ -73,7 +73,7 @@ with app.app_context():
         db.create_all()
         logger.info("Database connected successfully")
     except Exception as e:
-        logger.warning(f"⚠️ Database connection warning: {e}")
+        logger.warning(f"Database connection warning: {e}")
 
 
 def reset_prediction_buffer():
