@@ -12,7 +12,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-JWT_SECRET = os.getenv('JWT_SECRET', 'your-jwt-secret-key-change-this')
+JWT_SECRET = os.getenv('JWT_SECRET', 'gesture-ease-secret-key-2024')
 JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
 JWT_EXPIRATION_HOURS = int(os.getenv('JWT_EXPIRATION_HOURS', 24))
 
