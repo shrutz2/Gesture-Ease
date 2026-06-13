@@ -56,10 +56,6 @@ Gesture-Ease/
 ### Backend
 
 ```bash
-cd backend
-cp .env.example .env
-# Fill in your DATABASE_URL in .env
-
 pip install -r requirements.txt
 python app.py
 ```
