@@ -71,8 +71,6 @@ npm start
 ### Docker (recommended)
 
 ```bash
-# Copy and configure environment
-cp backend/.env.example backend/.env
 # Edit backend/.env with your database credentials
 
 docker-compose up --build
