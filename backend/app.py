@@ -76,6 +76,56 @@ with app.app_context():
         logger.warning(f"Database connection warning: {e}")
 
 
+# ---------------------------------------------------------------------------
+# Security configuration
+# ---------------------------------------------------------------------------
+
+# CORS allowlist - only these origins may call the API (no more wildcard "*").
+# Configure via ALLOWED_ORIGINS (comma-separated) in the environment.
+ALLOWED_ORIGINS = [
+    o.strip() for o in os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
+    if o.strip()
+]
+
+
+def _resolve_cors_origin():
+    """Echo the request Origin only if it is allow-listed, else the first allowed origin."""
+    origin = request.headers.get('Origin', '')
+    if origin in ALLOWED_ORIGINS:
+        return origin
+    return ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else ''
+
+
+# Rate limiting - protects auth endpoints from brute force and the API from abuse.
+# Gracefully degrades to a no-op if flask-limiter isn't installed, so the app
+# still runs (install it via requirements.txt to enable enforcement).
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+
+    limiter = Limiter(
+        key_func=get_remote_address,
+        app=app,
+        default_limits=["300 per hour"],
+        storage_uri="memory://",
+    )
+    RATE_LIMITING_ENABLED = True
+    logger.info("Rate limiting enabled (flask-limiter)")
+except ImportError:
+    RATE_LIMITING_ENABLED = False
+
+    class _NoOpLimiter:
+        """Fallback so @limiter.limit(...) is a harmless pass-through."""
+        def limit(self, *args, **kwargs):
+            def decorator(func):
+                return func
+            return decorator
+
+    limiter = _NoOpLimiter()
+    logger.warning("flask-limiter not installed - rate limiting is DISABLED. "
+                   "Run: pip install flask-limiter")
+
+
 def reset_prediction_buffer():
     """Reset softmax buffer when gesture session starts"""
     global SOFTMAX_BUFFER
@@ -174,8 +224,9 @@ def verify_gesture(landmarks_sequence, target_word, model, scaler, labels_map,
 
 @app.after_request
 def add_cors_headers(response):
-    """Add CORS headers to all responses"""
-    response.headers['Access-Control-Allow-Origin'] = '*'
+    """Add CORS headers to all responses (restricted to the allow-listed origins)"""
+    response.headers['Access-Control-Allow-Origin'] = _resolve_cors_origin()
+    response.headers['Vary'] = 'Origin'
     response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS,HEAD'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
     response.headers['Access-Control-Max-Age'] = '3600'
@@ -184,11 +235,12 @@ def add_cors_headers(response):
 
 @app.before_request
 def handle_preflight():
-    """Handle CORS preflight requests"""
+    """Handle CORS preflight requests (restricted to the allow-listed origins)"""
     if request.method == 'OPTIONS':
         response = jsonify()
         response.status_code = 204
-        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Origin'] = _resolve_cors_origin()
+        response.headers['Vary'] = 'Origin'
         response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS,HEAD'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
         return response
@@ -613,14 +665,17 @@ def predict_from_landmarks():
 
 
 @app.route('/api/attempt', methods=['POST', 'OPTIONS'])
+@token_required
 def save_attempt():
     """Save gesture attempt to database with user tracking"""
     if request.method == 'OPTIONS':
         return '', 204
-    
+
     try:
         data = request.json
-        user_id = data.get('user_id')
+        # Trust the authenticated user from the JWT, never a client-supplied id.
+        # This prevents users from writing attempts on behalf of someone else (IDOR).
+        user_id = request.user_id
         target_word = data.get('target_word', '').lower().strip()
         is_correct = data.get('is_correct', False)
         target_confidence = data.get('target_confidence', 0)
@@ -693,9 +748,14 @@ def save_attempt():
 
 
 @app.route('/api/user/<int:user_id>/progress', methods=['GET'])
+@token_required
 def get_user_progress(user_id):
     """Get user's word progress"""
     try:
+        # Ownership check: a user may only read their own progress (prevents IDOR).
+        if request.user_id != user_id:
+            return jsonify({'success': False, 'error': 'Forbidden'}), 403
+
         user = User.query.get(user_id)
         if not user:
             return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -714,11 +774,16 @@ def get_user_progress(user_id):
 
 
 @app.route('/api/user/<int:user_id>/attempts', methods=['GET'])
+@token_required
 def get_user_attempts(user_id):
     """Get user's recent gesture attempts"""
     try:
+        # Ownership check: a user may only read their own attempts (prevents IDOR).
+        if request.user_id != user_id:
+            return jsonify({'success': False, 'error': 'Forbidden'}), 403
+
         limit = request.args.get('limit', 20, type=int)
-        
+
         user = User.query.get(user_id)
         if not user:
             return jsonify({'success': False, 'error': 'User not found'}), 404
@@ -1151,6 +1216,7 @@ def serve_video(filename):
 
 # Authentication endpoints for frontend compatibility
 @app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
+@limiter.limit("5 per minute", methods=['POST'])
 def login():
     """Login with MySQL database"""
     if request.method == 'OPTIONS':
@@ -1199,6 +1265,7 @@ def login():
         }), 500
 
 @app.route('/api/auth/register', methods=['POST', 'OPTIONS'])
+@limiter.limit("3 per minute", methods=['POST'])
 def register():
     """Register new user with MySQL database"""
     if request.method == 'OPTIONS':
