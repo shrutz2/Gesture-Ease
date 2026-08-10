@@ -5,6 +5,7 @@ Provides token generation and verification
 
 import jwt
 import os
+import secrets
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import request, jsonify
@@ -12,7 +13,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-JWT_SECRET = os.getenv('JWT_SECRET', 'gesture-ease-secret-key-2024')
+# Never ship a hardcoded/guessable secret. Require it from the environment;
+# if it's missing, generate a strong random one at startup (tokens won't
+# survive a restart, which is a safe default that forces proper config in prod).
+JWT_SECRET = os.getenv('JWT_SECRET')
+if not JWT_SECRET:
+    JWT_SECRET = secrets.token_hex(32)
+    logger.warning(
+        "JWT_SECRET not set in environment - generated a random secret for this run. "
+        "Set JWT_SECRET in production so tokens stay valid across restarts."
+    )
 JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
 JWT_EXPIRATION_HOURS = int(os.getenv('JWT_EXPIRATION_HOURS', 24))
 

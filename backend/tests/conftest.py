@@ -7,6 +7,7 @@ import pytest
 import numpy as np
 import sys
 import os
+from functools import wraps
 from unittest.mock import MagicMock, patch
 
 # Point to SQLite before any app code runs
@@ -22,11 +23,25 @@ sys.modules['mediapipe'] = MagicMock()
 sys.modules['jwt'] = MagicMock()
 sys.modules['pymysql'] = MagicMock()
 
-# Mock auth module
+# Mock auth module. token_required is stubbed to inject a fixed authenticated
+# user (id=1) so protected endpoints work under test without a real JWT, while
+# still exercising the "user comes from the token, not the request body" contract.
 _auth_mock = MagicMock()
 _auth_mock.generate_token.return_value = 'mock-token-1-testuser'
 _auth_mock.verify_token.return_value = {'user_id': 1, 'username': 'testuser'}
-_auth_mock.token_required = lambda f: f
+
+
+def _mock_token_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        from flask import request as _rq
+        _rq.user_id = 1
+        _rq.username = 'testuser'
+        return f(*args, **kwargs)
+    return wrapper
+
+
+_auth_mock.token_required = _mock_token_required
 sys.modules['auth'] = _auth_mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -43,7 +58,12 @@ flask_app.app.config.update({
     'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
     'SQLALCHEMY_TRACK_MODIFICATIONS': False,
     'SQLALCHEMY_ENGINE_OPTIONS': {},
+    'RATELIMIT_ENABLED': False,  # don't rate-limit the test suite
 })
+
+# Disable the live limiter instance too (belt-and-suspenders for flask-limiter)
+if getattr(flask_app, 'RATE_LIMITING_ENABLED', False):
+    flask_app.limiter.enabled = False
 db.init_app(flask_app.app)  # Register SQLAlchemy with the real SQLite config
 
 

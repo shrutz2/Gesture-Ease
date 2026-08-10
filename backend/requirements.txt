@@ -14,3 +14,4 @@ pymysql
 python-dotenv
 gunicorn
 pyjwt
+flask-limiter

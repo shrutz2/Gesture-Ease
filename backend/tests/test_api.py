@@ -109,26 +109,33 @@ class TestSessionAndBuffer:
 
 
 class TestAttemptSaving:
-    def test_save_attempt_without_user_returns_400(self, client):
+    def test_save_attempt_requires_existing_token_user(self, client):
+        # No user in DB: the authenticated token user (id=1) doesn't exist -> 404.
         res = client.post('/api/attempt', json={
-            'target_word': 'hello',
-            'is_correct': True,
-            'points': 10
-        })
-        assert res.status_code == 400
-
-    def test_save_attempt_nonexistent_user_returns_404(self, client):
-        res = client.post('/api/attempt', json={
-            'user_id': 99999,
             'target_word': 'hello',
             'is_correct': True,
             'points': 10
         })
         assert res.status_code == 404
 
+    def test_save_attempt_ignores_client_supplied_user_id(self, client, sample_user, app):
+        # IDOR protection: a spoofed user_id in the body must be ignored; the
+        # attempt is saved under the authenticated token user (id=1), not 99999.
+        res = client.post('/api/attempt', json={
+            'user_id': 99999,
+            'target_word': 'hello',
+            'is_correct': True,
+            'points': 10
+        })
+        assert res.status_code == 201
+        with app.app_context():
+            from database import GestureAttempt
+            saved = GestureAttempt.query.all()
+            assert len(saved) == 1
+            assert saved[0].user_id == 1  # token user, not the spoofed 99999
+
     def test_save_attempt_valid_user(self, client, sample_user, app):
         res = client.post('/api/attempt', json={
-            'user_id': sample_user,
             'target_word': 'hello',
             'is_correct': True,
             'target_confidence': 0.75,
