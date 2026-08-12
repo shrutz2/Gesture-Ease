@@ -14,6 +14,8 @@ A real-time sign language learning platform that uses computer vision and deep l
 
 ## Demo
 
+![Gesture-Ease demo](demo.gif)
+
 Practice mode — perform a sign in front of your camera, and the model tells you if you got it right.
 
 ## How It Works

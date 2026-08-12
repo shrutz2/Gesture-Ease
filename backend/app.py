@@ -54,7 +54,7 @@ FRAME_BUFFER = deque(maxlen=SEQUENCE_LENGTH)
 PREDICTION_BUFFER = deque(maxlen=5)
 SOFTMAX_BUFFER = deque(maxlen=5)
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=None)
 
 # Database Configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'mysql+pymysql://root:password@localhost:3306/gesture_ease')
@@ -1804,6 +1804,51 @@ def save_landmarks():
             "status": "error",
             "message": f"Server error: {str(e)}"
         }), 500
+
+
+# ---------------------------------------------------------------------------
+# Serve the built React frontend (DEPLOYMENT-ONLY - no app/API logic changes).
+# In the Docker image the build is copied to <app>/static; locally it lives at
+# ../frontend/build. Override with the FRONTEND_BUILD_DIR env var if needed.
+#
+# Route ordering / why the API is never shadowed:
+#   Flask/Werkzeug matches the most specific rule first, so every registered
+#   route (/api/..., /health, /videos/<filename>, etc.) is chosen before this
+#   generic /<path:path> catch-all. As a belt-and-suspenders guard, any
+#   unregistered /api/* path returns a JSON 404 here instead of index.html.
+# ---------------------------------------------------------------------------
+def _resolve_frontend_dir():
+    env_dir = os.getenv('FRONTEND_BUILD_DIR')
+    if env_dir:
+        return env_dir
+    here = os.path.dirname(os.path.abspath(__file__))
+    for candidate in (os.path.join(here, 'static'),                      # Docker image
+                      os.path.join(here, '..', 'frontend', 'build')):    # local dev
+        if os.path.isdir(candidate):
+            return candidate
+    return os.path.join(here, 'static')
+
+
+FRONTEND_BUILD_DIR = _resolve_frontend_dir()
+
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_frontend(path):
+    """Serve the React production build. Static assets (JS/CSS/images) are
+    returned as-is; any other path falls back to index.html."""
+    if path.startswith('api/'):
+        return jsonify({'success': False, 'error': 'Not found'}), 404
+
+    file_path = os.path.join(FRONTEND_BUILD_DIR, path)
+    if path and os.path.isfile(file_path):
+        return send_from_directory(FRONTEND_BUILD_DIR, path)
+
+    index_path = os.path.join(FRONTEND_BUILD_DIR, 'index.html')
+    if os.path.isfile(index_path):
+        return send_from_directory(FRONTEND_BUILD_DIR, 'index.html')
+
+    return jsonify({'success': False, 'error': 'Frontend build not found'}), 404
 
 
 # Load artifacts on import for better startup time
