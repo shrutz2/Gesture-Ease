@@ -245,7 +245,7 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
     try {
       console.log(' Sending:', landmarks.length, 'frames');
 
-      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000'}/api/predict_landmarks`, {
+      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL || window.location.origin}/api/predict_landmarks`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -278,7 +278,7 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
       // Save to database
       if (user?.user_id) {
         try {
-          await fetch(`${process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000'}/api/attempt`, {
+          await fetch(`${process.env.REACT_APP_BACKEND_URL || window.location.origin}/api/attempt`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -318,7 +318,7 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
     try {
       console.log('Saving landmarks to dataset:', word, landmarks.length, 'frames');
 
-      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000'}/api/save_landmarks`, {
+      const res = await fetch(`${process.env.REACT_APP_BACKEND_URL || window.location.origin}/api/save_landmarks`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -398,7 +398,7 @@ export default function SignPractice({ word, onBack, user, token, refreshUserSta
           <video 
             controls 
             className="reference-video"
-            src={`${process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000'}/videos/${word}.mp4`}
+            src={`${process.env.REACT_APP_BACKEND_URL || window.location.origin}/videos/${word}.mp4`}
             onError={e => e.target.style.display = 'none'}
           />
         </div>
