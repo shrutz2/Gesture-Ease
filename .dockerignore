@@ -1,0 +1,29 @@
+# Keep secrets, training data, and junk OUT of the deployed image.
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+
+# Secrets — never bake into the image
+backend/.env
+frontend/.env
+
+# Training data / experiments (not needed to serve the app)
+backend/dataset
+backend/data
+backend/experiments
+backend/ml_env
+backend/instance
+backend/configs
+backend/scripts
+backend/tests
+backend/*.csv
+
+# Frontend deps / prebuilt output (image rebuilds these)
+frontend/node_modules
+frontend/build
+
+# Repo / editor / docs cruft
+.git
+.github
+*.pdf
+*.md
