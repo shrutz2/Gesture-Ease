@@ -1,3 +1,13 @@
+---
+title: Gesture Ease
+emoji: 🖐️
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Gesture-Ease
 
 A real-time sign language learning platform that uses computer vision and deep learning to recognize hand gestures. Users practice sign language through their webcam and receive instant feedback, points, and progress tracking.
