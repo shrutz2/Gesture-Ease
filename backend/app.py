@@ -6,7 +6,15 @@ Database: MySQL with SQLAlchemy ORM
 """
 
 import cv2
-import mediapipe as mp
+# MediaPipe is only used by the optional raw-frame endpoints; the main flow
+# receives landmarks from the browser. Import it defensively so a missing or
+# partially-installed mediapipe can't stop the whole server from booting.
+try:
+    import mediapipe as mp
+    if not hasattr(mp, 'solutions'):
+        mp = None
+except Exception:
+    mp = None
 import numpy as np
 import tensorflow as tf
 from flask import Flask, request, jsonify, send_from_directory
@@ -438,8 +446,9 @@ def load_mlops_artifacts():
         return False
 
 
-# Initialize landmark extractor
-landmark_extractor = EnhancedLandmarkExtractor()
+# Initialize landmark extractor (only if MediaPipe is available; the browser
+# does landmark extraction for the main flow, so this is optional).
+landmark_extractor = EnhancedLandmarkExtractor() if mp is not None else None
 
 def extract_and_preprocess_frame(frame_base64):
     """Enhanced frame processing with quality control"""
