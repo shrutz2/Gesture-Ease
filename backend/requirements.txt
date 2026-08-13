@@ -1,10 +1,13 @@
 flask>=2.0
 flask-cors
 flask-sqlalchemy>=3.0
-numpy
+# Pinned to the versions that trained/load the model (Keras 2.13). Newer
+# TensorFlow (Keras 3) drops the LSTM time_major arg and fails to load the .h5.
+numpy==1.26.4
 opencv-python-headless
-mediapipe
-tensorflow
+mediapipe==0.10.9
+tensorflow==2.13.0
+protobuf==3.20.3
 scikit-learn
 pillow
 pytest
