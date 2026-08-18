@@ -3,6 +3,8 @@
 
 A real-time sign language learning platform that uses computer vision and deep learning to recognize hand gestures. Users practice sign language through their webcam and receive instant feedback, points, and progress tracking.
 
+**🔗 Live demo: [80.225.204.112.nip.io](https://80.225.204.112.nip.io)** — practice signs in your browser with real-time AI feedback (best on Chrome; allow camera access).
+
 ## Demo
 
 ![Gesture-Ease demo](demo.gif)
@@ -25,8 +27,8 @@ Practice mode — perform a sign in front of your camera, and the model tells yo
 | Backend | Python, Flask, TensorFlow/Keras |
 | ML Model | BiLSTM neural network (82.6% top-1 accuracy, 92.5% top-3) |
 | Database | MySQL with SQLAlchemy ORM |
-| Auth | JWT tokens, bcrypt password hashing |
-| Deployment | Docker, Gunicorn, AWS ECS/ECR |
+| Auth | JWT tokens, hashed passwords |
+| Deployment | Docker, Gunicorn |
 
 ## Project Structure
 
@@ -123,4 +125,4 @@ python train_model.py       # train BiLSTM model
 
 ## Deployment
 
-The project includes AWS ECS/ECR deployment configuration. See the `deploy/` folder and `.github/workflows/` for CI/CD pipeline details.
+The app runs as a single Docker image where Flask serves the built React frontend, the API, and the model together. A live instance is hosted on a small Ubuntu VM behind Caddy (automatic HTTPS). See `Dockerfile` and `deploy/oracle-setup.sh`.

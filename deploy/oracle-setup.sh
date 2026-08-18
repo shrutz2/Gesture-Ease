@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-# One-command deploy for Gesture-Ease on an Ubuntu VM (e.g. Oracle Always Free).
-# Model and app code are NOT modified — this only sets up the host and runs the
-# existing Docker image, with automatic HTTPS (needed so the browser webcam works).
-#
-# Run on a fresh Ubuntu 22.04 VM:
+# Deploy Gesture-Ease on a fresh Ubuntu 22.04 VM. Run:
 #   curl -fsSL https://raw.githubusercontent.com/shrutz2/Gesture-Ease/main/deploy/oracle-setup.sh | bash
-#
 set -euo pipefail
 echo "==> Gesture-Ease deploy starting..."
 

@@ -7,9 +7,7 @@
 backend/.env
 frontend/.env
 
-# Training data / experiments (not needed to serve the app)
-# NOTE: backend/data/videos (55 MB of sign reference clips) IS kept so the
-# practice videos show; only the heavy training data is excluded.
+# training data / experiments (videos are kept so practice clips still show)
 backend/dataset
 backend/data/landmarks
 backend/experiments

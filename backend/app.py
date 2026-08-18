@@ -6,9 +6,7 @@ Database: MySQL with SQLAlchemy ORM
 """
 
 import cv2
-# MediaPipe is only used by the optional raw-frame endpoints; the main flow
-# receives landmarks from the browser. Import it defensively so a missing or
-# partially-installed mediapipe can't stop the whole server from booting.
+# optional - the browser handles landmark extraction for the main flow
 try:
     import mediapipe as mp
     if not hasattr(mp, 'solutions'):
@@ -84,12 +82,7 @@ with app.app_context():
         logger.warning(f"Database connection warning: {e}")
 
 
-# ---------------------------------------------------------------------------
-# Security configuration
-# ---------------------------------------------------------------------------
-
-# CORS allowlist - only these origins may call the API (no more wildcard "*").
-# Configure via ALLOWED_ORIGINS (comma-separated) in the environment.
+# CORS: allow only these origins (set ALLOWED_ORIGINS, comma-separated)
 ALLOWED_ORIGINS = [
     o.strip() for o in os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
     if o.strip()
@@ -104,9 +97,7 @@ def _resolve_cors_origin():
     return ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else ''
 
 
-# Rate limiting - protects auth endpoints from brute force and the API from abuse.
-# Gracefully degrades to a no-op if flask-limiter isn't installed, so the app
-# still runs (install it via requirements.txt to enable enforcement).
+# rate limiting on auth endpoints (no-op if flask-limiter is missing)
 try:
     from flask_limiter import Limiter
     from flask_limiter.util import get_remote_address
@@ -682,8 +673,7 @@ def save_attempt():
 
     try:
         data = request.json
-        # Trust the authenticated user from the JWT, never a client-supplied id.
-        # This prevents users from writing attempts on behalf of someone else (IDOR).
+        # use the user from the token, not the request body
         user_id = request.user_id
         target_word = data.get('target_word', '').lower().strip()
         is_correct = data.get('is_correct', False)
@@ -761,7 +751,7 @@ def save_attempt():
 def get_user_progress(user_id):
     """Get user's word progress"""
     try:
-        # Ownership check: a user may only read their own progress (prevents IDOR).
+        # users can only read their own progress
         if request.user_id != user_id:
             return jsonify({'success': False, 'error': 'Forbidden'}), 403
 
@@ -787,7 +777,7 @@ def get_user_progress(user_id):
 def get_user_attempts(user_id):
     """Get user's recent gesture attempts"""
     try:
-        # Ownership check: a user may only read their own attempts (prevents IDOR).
+        # users can only read their own attempts
         if request.user_id != user_id:
             return jsonify({'success': False, 'error': 'Forbidden'}), 403
 
@@ -1815,17 +1805,7 @@ def save_landmarks():
         }), 500
 
 
-# ---------------------------------------------------------------------------
-# Serve the built React frontend (DEPLOYMENT-ONLY - no app/API logic changes).
-# In the Docker image the build is copied to <app>/static; locally it lives at
-# ../frontend/build. Override with the FRONTEND_BUILD_DIR env var if needed.
-#
-# Route ordering / why the API is never shadowed:
-#   Flask/Werkzeug matches the most specific rule first, so every registered
-#   route (/api/..., /health, /videos/<filename>, etc.) is chosen before this
-#   generic /<path:path> catch-all. As a belt-and-suspenders guard, any
-#   unregistered /api/* path returns a JSON 404 here instead of index.html.
-# ---------------------------------------------------------------------------
+# serve the built React app (static folder in the image, ../frontend/build in dev)
 def _resolve_frontend_dir():
     env_dir = os.getenv('FRONTEND_BUILD_DIR')
     if env_dir:
